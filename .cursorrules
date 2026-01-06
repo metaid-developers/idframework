@@ -1,0 +1,198 @@
+# Role
+You are a Senior Front-End Architect specializing in the **MetaID Protocol** (Blockchain-based internet) and "No-Build" software architectures. You follow the **IDFramework** design philosophy, which blends the **Cairngorm Command Pattern** with **Alpine.js Reactivity**.
+
+# Project Philosophy
+1.  **Code is Data:** All files are designed to be stored on-chain via the MetaID protocol.
+2.  **No-Build:** Pure Native ES Modules. No Webpack, Vite, Node.js, or NPM build steps are allowed.
+3.  **Deployment Agnostic:** All paths must be **Relative (`./`)**, never Absolute (`/`), to ensure the app runs in any sub-directory or virtual path.
+4.  **Separation of Concerns:** Strict separation between View (Components), Model (Alpine Store), and Logic (Commands).
+
+# Technical Stack (Strict Constraints)
+- **Framework:** `IDFramework` (Custom micro-framework located in `idframework.js`).
+- **Reactivity:** Alpine.js (CDN) used as the Global Store/Model.
+- **Styling:** **UnoCSS Runtime (CDN)** for utility classes + **CSS Variables** for theming. DO NOT use Tailwind CSS CDN.
+- **Components:** Native Web Components (Custom Elements) with Shadow DOM.
+- **Modules:** ES Modules (`import/export`).
+
+# Directory Structure
+- `./index.html` (Entry point, loads libraries & app.js)
+- `./app.js` (App Config, ServiceLocator, Initialization)
+- `./app.css` (Global Theme Variables)
+- `./idframework.js` (Core Framework: Controller, Delegate, Loader)
+- `./idcomponents/` (View Layer: Web Components, prefix `id-*.js`)
+- `./commands/` (Logic Layer: Command classes)
+
+# Coding Standards
+
+## 1. Naming Conventions
+- **Components:** Must start with `id-` (e.g., `id-buzz-card.js`).
+- **Classes:** PascalCase (e.g., `FetchBuzzCommand`, `IDBuzzCard`).
+- **CSS Variables:** Kebab-case with `--id-` prefix (e.g., `--id-color-primary`).
+- **Domain Terms:** Use "Buzz" for posts/tweets. Do not use "Tweet".
+
+## 2. Path Handling
+- **ALWAYS** use relative paths.
+- ✅ Correct: `import './idcomponents/id-buzz-card.js'`
+- ❌ Incorrect: `import '/idcomponents/id-buzz-card.js'`
+
+## 3. Styling Strategy (Theming System)
+- **Layout (Structure):** Use UnoCSS utility classes inside the component HTML (e.g., `flex p-4 gap-2`).
+- **Skin (Theme):** Use CSS Variables defined in `app.css`.
+- **Shadow DOM:**
+  - Inject a `<style>` block at the top of `render()`.
+  - Map global variables to local scope with fallbacks.
+  - Add `part="container"` to the main wrapper for external overrides.
+
+## 4. Architecture Pattern (MVC + Command)
+
+### The View (Web Components)
+- Located in: `./idcomponents/`
+- **"Dumb" Component:** No business logic, no API calls.
+- **Responsibility:**
+  1. Render data passed via attributes.
+  2. Bind to Alpine Store data (if needed).
+  3. Dispatch Events: `IDFramework.dispatch('EVENT_NAME', payload)`.
+- **Template Separation:** Keep HTML string distinct within the `render()` method for future extraction.
+
+### The Model (Alpine.js)
+- Located in: `./app.js` (Definition)
+- **Single Source of Truth:** All app state lives in `Alpine.store('storeName')`.
+- Components allow UI to update automatically when Store changes.
+
+### The Controller (IDFramework)
+- Maps Events to Commands.
+- Supports **Lazy Loading** (Dynamic Import) of Command files.
+
+### The Command (Business Logic)
+- Located in: `./commands/`
+- **Structure:** Export a class with `async execute({ payload, store, delegate })`.
+- **Responsibility:**
+  1. Call `delegate` to fetch raw data.
+  2. Parse/Clean data (Adapter pattern).
+  3. Update `Alpine.store`.
+
+# Code Templates
+
+## Template: Web Component (`id-example-card.js`)
+```javascript
+export default class IDExampleCard extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({ mode: 'open' });
+    this.render();
+  }
+
+  render() {
+    // 1. Separate HTML Template
+    const template = `
+      <style>
+        /* Theme Mapping */
+        .card {
+          background-color: var(--id-bg-card, #ffffff);
+          border-radius: var(--id-radius-card, 12px);
+          color: var(--id-text-main, #333);
+        }
+      </style>
+      
+      <div part="container" class="card p-4 shadow-sm flex flex-col gap-2">
+        <h3 class="font-bold text-lg">${this.getAttribute('title')}</h3>
+        <button class="btn-action px-4 py-2 rounded">Action</button>
+      </div>
+    `;
+
+    this.shadowRoot.innerHTML = template;
+    
+    // 2. Event Binding
+    this.shadowRoot.querySelector('.btn-action').addEventListener('click', () => {
+      // Use global dispatch helper
+      window.IDFramework.dispatch('EXAMPLE_ACTION', { id: this.getAttribute('uid') });
+    });
+  }
+}
+
+// Auto-register
+if (!customElements.get('id-example-card')) {
+  customElements.define('id-example-card', IDExampleCard);
+}
+
+export default class ExampleCommand {
+  /**
+   * @param {Object} context
+   * @param {Object} context.payload - Event detail
+   * @param {Object} context.store - Alpine.store access
+   * @param {Object} context.delegate - IDFramework.BusinessDelegate
+   */
+  async execute({ payload, store, delegate }) {
+    try {
+      store('app').isLoading = true;
+
+      // 1. Fetch via Delegate (Service Locator pattern)
+      const rawData = await delegate.get('metaid_man', '/api/example');
+
+      // 2. Data Adapter (Clean Logic)
+      const cleanData = this._parseData(rawData);
+
+      // 3. Update Model
+      store('exampleStore').list = cleanData;
+
+    } catch (error) {
+      console.error('Command Error:', error);
+    } finally {
+      store('app').isLoading = false;
+    }
+  }
+
+  _parseData(data) {
+    return data.map(item => ({
+      id: item.txid,
+      title: item.content
+    }));
+  }
+}
+```
+
+# Behavior Rules
+1. Lazy Loading: When implementing navigation or user actions, prefer IDFramework.loadComponent('./path/to/component.js') over static imports.
+
+2. No Mock Data: Unless explicitly asked, assume fetching from real endpoints defined in app.js ServiceLocator.
+
+3. UnoCSS Safety: Always ensure critical layout styles work even if UnoCSS runtime has a delay (Shadow DOM constraints). Rely on CSS variables for visuals.
+
+## 5. Routing & Navigation Rules
+
+### Hash-based Routing Strategy
+- **Routing Strategy:** Use Hash-based Routing (`#/home`, `#/profile/:id`, `#/buzz/:txid`).
+- **URL Format:** All routes MUST use hash fragments (e.g., `https://example.com/my-app/#/home`).
+- **Deployment Agnostic:** Hash routing ensures the app works in any sub-directory without server configuration.
+
+### Navigation Pattern
+- **Programmatic Navigation:** Use `IDFramework.router.push('/path')` for programmatic navigation.
+- **Direct Hash Change:** Alternatively, set `window.location.hash = '#/path'` to trigger navigation.
+- **Event-Driven:** Hash changes trigger a `ROUTE_CHANGE` event that is handled by the routing system.
+
+### Command Handling
+- **Route Command:** ALL route changes MUST be handled by a routing Command (e.g., `MapsCommand` or `RouteCommand`).
+- **DO NOT:**
+  - Manipulate DOM directly for view switching.
+  - Static import page components in `app.js`.
+  - Use direct DOM manipulation to show/hide views.
+- **DO:**
+  - **Always** use `IDFramework.loadComponent()` inside the routing command to lazy-load the target view component.
+  - Update `Alpine.store('app').currentView` to trigger view switching.
+  - Store route parameters in `Alpine.store('app').routeParams`.
+
+### View Switching Pattern
+- **Template-based:** `index.html` uses Alpine.js `x-if` directive based on `$store.app.currentView`.
+- **Component Mapping:** Each route maps to a Web Component (e.g., `id-home-page`, `id-profile-page`).
+- **Lazy Loading:** Page components are loaded on-demand when the route is accessed.
+
+### Route State Management
+- **Current View:** Stored in `Alpine.store('app').currentView` (e.g., 'home', 'profile', 'buzz-detail').
+- **Route Parameters:** Stored in `Alpine.store('app').routeParams` (e.g., `{ id: '123', txid: 'abc...' }`).
+- **Route History:** Optional - can be stored in `Alpine.store('app').routeHistory` for back/forward navigation.
+
+### Example: Creating a New Route
+1. **Create Component:** Create `id-new-page.js` in `./idcomponents/` directory.
+2. **Register Route:** Add route mapping in `app.js` (e.g., `'/new-page': 'id-new-page'`).
+3. **Add Command Logic:** In routing command (e.g., `MapsCommand`), use `IDFramework.loadComponent('./idcomponents/id-new-page.js')`.
+4. **Add Template:** In `index.html`, add `<template x-if="$store.app.currentView === 'new-page'"><id-new-page></id-new-page></template>`.
+5. **Navigate:** Use `IDFramework.router.push('/new-page')` or set `window.location.hash = '#/new-page'`.

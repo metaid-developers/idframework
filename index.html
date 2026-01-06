@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IDFramework - Buzz Feed Demo</title>
+  
+  <!-- Alpine.js CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  
+  <!-- Initialize Alpine Stores BEFORE Alpine processes DOM -->
+  <!-- This ensures stores are available even if framework loads after alpine:init -->
+  <script>
+    // CRITICAL: Register stores in alpine:init event
+    // This event fires BEFORE Alpine processes the DOM, ensuring stores are available
+    window.addEventListener('alpine:init', () => {
+      // Register built-in models (will be re-initialized by framework if available)
+      Alpine.store('wallet', {
+        isConnected: false,
+        address: null,
+        metaid: null,
+        publicKey: null,
+        network: null,
+      });
+      
+      Alpine.store('app', {
+        isLogin: false,
+        userAddress: null,
+        // Routing state
+        currentView: null,
+        routeParams: {},
+        currentPath: '/',
+      });
+      
+      // Register application-specific models
+      Alpine.store('buzz', {
+        list: [],
+        isLoading: false,
+        error: null,
+      });
+      
+      // If framework is already loaded, call init to ensure consistency
+      if (window.IDFramework) {
+        IDFramework.initModels({
+          buzz: Alpine.store('buzz'),
+        });
+      }
+    });
+  </script>
+  
+  <!-- UnoCSS Runtime CDN -->
+  <script>
+    window.__unocss = {
+      theme: {},
+      shortcuts: {},
+      rules: [],
+    };
+  </script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@unocss/runtime"></script>
+  
+  <!-- Global Styles -->
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <!-- Connect Button - Top Right -->
+  <div class="connect-button-wrapper">
+    <id-connect-button></id-connect-button>
+  </div>
+
+  <div class="container" x-data>
+    <header class="header">
+      <h1 class="title">Buzz Feed</h1>
+      <p class="subtitle">Decentralized Social Feed powered by MetaID</p>
+    </header>
+
+    <!-- Loading State -->
+    <div x-show="$store.buzz && $store.buzz.isLoading" class="loading">
+      <p>Loading buzz...</p>
+    </div>
+
+    <!-- Error State -->
+    <div x-show="$store.buzz && $store.buzz.error" class="error" x-text="$store.buzz ? $store.buzz.error : ''"></div>
+
+    <!-- Action Buttons -->
+    <div class="action-buttons-container" x-show="$store.buzz">
+      <button 
+        @click="handlePostBuzzClick()"
+        class="post-button"
+      >
+        ✍️ Post Buzz
+      </button>
+      <button 
+        @click="window.IDFramework && window.IDFramework.dispatch('fetchBuzz')"
+        :disabled="$store.buzz && $store.buzz.isLoading"
+        class="refresh-button"
+      >
+        <span x-show="!$store.buzz.isLoading">🔄 Refresh</span>
+        <span x-show="$store.buzz.isLoading">Loading...</span>
+      </button>
+    </div>
+
+    <!-- Buzz List -->
+    <div class="buzz-list" x-show="$store.buzz && !$store.buzz.isLoading && !$store.buzz.error && $store.buzz.list.length > 0">
+      <template x-for="(buzz, index) in ($store.buzz ? $store.buzz.list : [])" :key="buzz.txid || index">
+        <div x-data="{ item: buzz }">
+          <id-buzz-card
+            x-bind:content="item.content"
+            x-bind:author="item.author"
+            x-bind:txid="item.txid"
+          ></id-buzz-card>
+        </div>
+      </template>
+    </div>
+
+    <!-- Empty State -->
+    <div x-show="$store.buzz && !$store.buzz.isLoading && !$store.buzz.error && $store.buzz.list.length === 0" class="empty">
+      <p>No buzz found. Be the first to create one!</p>
+    </div>
+  </div>
+
+  <!-- Post Buzz Panel (will be dynamically loaded when needed) -->
+  <id-post-buzz-panel></id-post-buzz-panel>
+
+  <!-- Import IDFramework Core -->
+  <script type="module" src="./idframework.js"></script>
+  
+  <!-- Import Web Components (only essential ones at startup) -->
+  <!-- id-buzz-card.js and id-post-buzz-panel.js are loaded dynamically on demand -->
+  <script type="module" src="./idcomponents/id-connect-button.js"></script>
+  
+  <!-- Import App Configuration -->
+  <script type="module" src="./app.js"></script>
+  
+  <!-- Application Scripts -->
+  <script>
+    // Track if post buzz panel component is loaded
+    window._postBuzzPanelLoaded = false;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // Add global function to handle Post Buzz button click
+      window.handlePostBuzzClick = async function() {
+        // Check login status from app store
+        if (typeof Alpine === 'undefined' || !Alpine.store('app')) {
+          alert('Application is not ready. Please refresh the page.');
+          return;
+        }
+
+        const appStore = Alpine.store('app');
+        
+        // Check if user is logged in
+        if (!appStore.isLogin) {
+          alert('Please connect your wallet first before posting a buzz.');
+          return;
+        }
+
+        // User is logged in, load component dynamically if not already loaded
+        try {
+          if (!window._postBuzzPanelLoaded && window.IDFramework) {
+            // Load the component dynamically
+            await window.IDFramework.loadComponent('./idcomponents/id-post-buzz-panel.js');
+            window._postBuzzPanelLoaded = true;
+            console.log('Post buzz panel component loaded successfully');
+          }
+
+          // Wait a bit for custom element to be defined
+          await new Promise(resolve => {
+            if (customElements.get('id-post-buzz-panel')) {
+              resolve();
+            } else {
+              // Wait for custom element to be defined
+              const checkInterval = setInterval(() => {
+                if (customElements.get('id-post-buzz-panel')) {
+                  clearInterval(checkInterval);
+                  resolve();
+                }
+              }, 10);
+              // Timeout after 1 second
+              setTimeout(() => {
+                clearInterval(checkInterval);
+                resolve();
+              }, 1000);
+            }
+          });
+
+          // Now open the panel
+          const panel = document.querySelector('id-post-buzz-panel');
+          if (panel) {
+            await panel.open();
+          } else {
+            throw new Error('Post buzz panel element not found');
+          }
+        } catch (error) {
+          console.error('Failed to load or open post buzz panel:', error);
+          alert('Failed to open post panel. Please try again.');
+        }
+      };
+    });
+  </script>
+</body>
+</html>
+
