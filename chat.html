@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IDFramework - Chat Demo</title>
+  
+  <!-- Alpine.js CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  
+  <!-- Initialize Alpine Stores BEFORE Alpine processes DOM -->
+  <script>
+    window.addEventListener('alpine:init', () => {
+      // Register built-in models (will be re-initialized by framework if available)
+      Alpine.store('wallet', {
+        isConnected: false,
+        address: null,
+        metaid: null,
+        globalMetaId: null, // GlobalMetaID for cross-chain identity
+        globalMetaIdInfo: null, // Full GlobalMetaID info (mvc, btc, doge)
+        publicKey: null,
+        network: null,
+      });
+      
+      Alpine.store('app', {
+        isLogin: false,
+        userAddress: null,
+        // Routing state
+        currentView: null,
+        routeParams: {},
+        currentPath: '/',
+      });
+      
+      // Register application-specific models for Chat app
+      Alpine.store('chat', {
+        conversations: {}, // { metaid: { metaid, groupId, type, index, name, avatarUrl, lastMessage, lastMessageTime, unreadCount } }
+        currentConversation: null, // Current chat metaid or groupId
+        currentConversationId: null, // Alias for currentConversation
+        currentConversationType: null, // '1' for group, '2' for private
+        currentConversationIndex: null, // Index for fetching messages
+        messages: {}, // { conversationKey: [{ id, groupId, content, timestamp, userInfo, index }] }
+        isLoading: false,
+        error: null,
+      });
+      
+      Alpine.store('user', {
+        users: {},
+        isLoading: false,
+        error: null,
+      });
+      
+      // If framework is already loaded, call init to ensure consistency
+      if (window.IDFramework) {
+        IDFramework.initModels({
+          chat: Alpine.store('chat'),
+        });
+      }
+    });
+  </script>
+  
+  <!-- UnoCSS Runtime CDN -->
+  <script>
+    window.__unocss = {
+      theme: {},
+      shortcuts: {},
+      rules: [],
+    };
+  </script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@unocss/runtime"></script>
+  
+  <!-- Global Styles -->
+  <link rel="stylesheet" href="./app.css">
+  <link rel="stylesheet" href="./chat.css">
+</head>
+<body>
+  <!-- Connect Button - Top Right -->
+  <div class="connect-button-wrapper">
+    <id-connect-button></id-connect-button>
+  </div>
+
+  <!-- Global User Info Float Panel -->
+  <id-userinfo-float-panel></id-userinfo-float-panel>
+
+  <!-- Chat Application Container -->
+  <div class="chat-container" x-data="{ showChatDrawer: false }">
+    <!-- Left Sidebar: Chat List -->
+    <aside class="chat-sidebar">
+      <id-chat-chatlist-panel 
+        :current-conversation="$store.chat.currentConversation"
+        @conversation-selected="showChatDrawer = true"
+      ></id-chat-chatlist-panel>
+    </aside>
+
+    <!-- Right Side: Chat Window -->
+    <main class="chat-main" :class="{ 'drawer-open': showChatDrawer }">
+      <!-- Mobile: Back button to close drawer -->
+      <button 
+        class="chat-drawer-close" 
+        x-show="showChatDrawer && $store.chat.currentConversation"
+        @click="showChatDrawer = false"
+      >
+        ← Back
+      </button>
+      
+      <template x-if="!$store.chat.currentConversation">
+        <div class="chat-empty">
+          <div class="empty-message">
+            <h2>Select a chat to start messaging</h2>
+            <p>Choose a conversation from the sidebar or start a new one</p>
+          </div>
+        </div>
+      </template>
+
+      <!-- Chat Header (shown when conversation is selected) -->
+      <header class="chat-header" x-show="$store.chat.currentConversation">
+        <div class="chat-header-user">
+          <div class="chat-header-avatar">
+            <!-- Group Chat Avatar -->
+            <template x-if="$store.chat.currentConversationType === '1'">
+              <img 
+                x-show="$store.chat.conversations[$store.chat.currentConversation]?.avatar" 
+                :src="$store.chat.conversations[$store.chat.currentConversation]?.avatar" 
+                :alt="$store.chat.conversations[$store.chat.currentConversation]?.name || 'Group'"
+                class="avatar"
+              />
+            </template>
+            <!-- Private Chat Avatar -->
+            <template x-if="$store.chat.currentConversationType === '2'">
+              <img 
+                x-show="$store.user.users[$store.chat.currentConversation]?.avatarUrl" 
+                :src="$store.user.users[$store.chat.currentConversation]?.avatarUrl" 
+                :alt="$store.user.users[$store.chat.currentConversation]?.name || 'User'"
+                class="avatar"
+              />
+            </template>
+            <!-- Avatar Placeholder -->
+            <div class="avatar-placeholder">
+              <span x-text="($store.chat.conversations[$store.chat.currentConversation]?.name || $store.user.users[$store.chat.currentConversation]?.name || $store.chat.currentConversation || '?').charAt(0).toUpperCase()"></span>
+            </div>
+          </div>
+          <div class="chat-header-info">
+            <div class="chat-header-name" x-text="$store.chat.conversations[$store.chat.currentConversation]?.name || $store.user.users[$store.chat.currentConversation]?.name || $store.chat.currentConversation?.substring(0, 16) + '...' || 'Chat'"></div>
+            <div class="chat-header-status" x-text="$store.chat.currentConversationType === '1' ? 'Group Chat' : 'Online'"></div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Messages Area - Always in DOM, component always created -->
+      <div class="chat-messages" id="chat-messages">
+        <id-chat-groupmsg-list></id-chat-groupmsg-list>
+      </div>
+
+      <!-- Input Area (shown when conversation is selected) -->
+      <div class="chat-input-area" x-show="$store.chat.currentConversation">
+        <textarea 
+          class="chat-input" 
+          placeholder="Type a message..."
+          x-model="messageInput"
+          @keydown.enter.prevent="handleSendMessage()"
+        ></textarea>
+        <button 
+          class="send-button" 
+          @click="handleSendMessage()"
+          :disabled="!messageInput || !messageInput.trim()"
+        >
+          Send
+        </button>
+      </div>
+    </main>
+  </div>
+
+  <!-- IDFramework Core -->
+  <script type="module" src="./idframework.js"></script>
+  
+  <!-- Chat Application Configuration -->
+  <script type="module" src="./chat.js"></script>
+
+  <!-- Global Event Handlers -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Chat click handler
+      window.handleChatClick = (metaid) => {
+        if (window.IDFramework) {
+          window.IDFramework.dispatch('selectConversation', { metaid });
+        }
+      };
+
+      // Send message handler
+      window.handleSendMessage = () => {
+        const chatStore = Alpine.store('chat');
+        if (!chatStore.currentConversation) return;
+        
+        const input = document.querySelector('.chat-input');
+        const message = input?.value?.trim();
+        if (!message) return;
+
+        if (window.IDFramework) {
+          window.IDFramework.dispatch('sendMessage', {
+            to: chatStore.currentConversation,
+            content: message,
+          });
+        }
+
+        // Clear input
+        if (input) {
+          input.value = '';
+          window.messageInput = '';
+        }
+      };
+
+      // Time formatting helpers
+      window.formatTime = (timestamp) => {
+        if (!timestamp) return '';
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diff = now - date;
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        
+        if (days === 0) {
+          return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        } else if (days === 1) {
+          return 'Yesterday';
+        } else if (days < 7) {
+          return date.toLocaleDateString('en-US', { weekday: 'short' });
+        } else {
+          return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+      };
+
+      window.formatMessageTime = (timestamp) => {
+        if (!timestamp) return '';
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      };
+    });
+  </script>
+</body>
+</html>
+

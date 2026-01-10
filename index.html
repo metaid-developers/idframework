@@ -39,6 +39,12 @@
         error: null,
       });
       
+      Alpine.store('user', {
+        users: {},
+        isLoading: false,
+        error: null,
+      });
+      
       // If framework is already loaded, call init to ensure consistency
       if (window.IDFramework) {
         IDFramework.initModels({
@@ -66,6 +72,9 @@
   <div class="connect-button-wrapper">
     <id-connect-button></id-connect-button>
   </div>
+
+  <!-- Global User Info Float Panel -->
+  <id-userinfo-float-panel></id-userinfo-float-panel>
 
   <div class="container" x-data>
     <header class="header">
@@ -107,6 +116,7 @@
             x-bind:content="item.content"
             x-bind:author="item.author"
             x-bind:txid="item.txid"
+            x-bind:metaid="item.author"
           ></id-buzz-card>
         </div>
       </template>

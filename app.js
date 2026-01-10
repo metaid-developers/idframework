@@ -15,6 +15,8 @@
 // Services are accessed via serviceKey in BusinessDelegate calls
 window.ServiceLocator = {
   metaid_man: 'https://manapi.metaid.io', // MetaID data indexer API
+  metafs: 'https://file.metaid.io/metafile-indexer/api', // MetaFS service for user info and avatars
+  idchat: 'https://api.idchat.io/chat-api/group-chat', // IDChat API service
   // Add more services as needed:
   // metaid_node: 'https://node.metaid.io',
   // custom_service: 'https://api.example.com',
@@ -29,6 +31,14 @@ window.ServiceLocator = {
 // BuzzModel - Application-specific model for Buzz feed data
 const BuzzModel = {
   list: [],
+  isLoading: false,
+  error: null,
+};
+
+// UserModel - Application-specific model for user data
+// Stores user information keyed by metaid
+const UserModel = {
+  users: {}, // { metaid: { globalMetaId, metaid, name, address, avatar, avatarId, chatpubkey, chatpubkeyId, avatarImg } }
   isLoading: false,
   error: null,
 };
@@ -49,8 +59,8 @@ window.addEventListener('alpine:init', () => {
       IDFramework.init({
         // Register application-specific models
         buzz: BuzzModel,
+        user: UserModel,
         // Add more custom models as needed:
-        // user: UserModel,
         // settings: SettingsModel,
       });
     } else {
@@ -106,24 +116,22 @@ window.addEventListener('DOMContentLoaded', async () => {
   // and registerBuiltIn will just update the command if it already exists
   IDFramework.init({
     buzz: BuzzModel,
+    user: UserModel,
   });
 
   // ============================================
-  // Route Configuration
+  // Route Configuration (DISABLED)
   // ============================================
-  // Define application routes
-  // Each route maps a path pattern to a view name
+  // Routing functionality is temporarily disabled
+  // Uncomment below to enable routing:
+  /*
   const routes = [
     { path: '/', view: 'home' },
     { path: '/home', view: 'home' },
     { path: '/profile/:id', view: 'profile' },
-    // Add more routes as needed:
-    // { path: '/buzz/:txid', view: 'buzz-detail' },
-    // { path: '/settings', view: 'settings' },
   ];
-
-  // Initialize router with route configuration
   IDFramework.IDRouter.init(routes);
+  */
 
   // ============================================
   // Register Application Commands
@@ -131,7 +139,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Register file-based commands for this application
   IDFramework.IDController.register('fetchBuzz', './commands/FetchBuzzCommand.js');
   IDFramework.IDController.register('postBuzz', './commands/PostBuzzCommand.js');
-  IDFramework.IDController.register('ROUTE_CHANGE', './commands/NavigateCommand.js');
+  // IDFramework.IDController.register('ROUTE_CHANGE', './commands/NavigateCommand.js'); // Disabled - routing disabled
+  IDFramework.IDController.register('fetchUser', './commands/FetchUserCommand.js');
   
   // Built-in commands are already registered by IDFramework.init()
   // You can also register additional built-in commands here if needed:
@@ -153,6 +162,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     console.log('Buzz card component loaded successfully');
   } catch (error) {
     console.error('Failed to load buzz card component:', error);
+    // Continue anyway - the component might be loaded later
+  }
+  
+  // Step 1.5: Load the user info float panel component
+  try {
+    await IDFramework.loadComponent('./idcomponents/id-userinfo-float-panel.js');
+    console.log('User info float panel component loaded successfully');
+  } catch (error) {
+    console.error('Failed to load user info float panel component:', error);
     // Continue anyway - the component might be loaded later
   }
   

@@ -60,6 +60,8 @@ class IDFramework {
         isConnected: false,
         address: null,
         metaid: null,
+        globalMetaId: null, // GlobalMetaID for cross-chain identity
+        globalMetaIdInfo: null, // Full GlobalMetaID info (mvc, btc, doge)
         publicKey: null,
         network: null, // 'mainnet' | 'testnet'
       });
@@ -157,28 +159,309 @@ class IDFramework {
     },
 
     /**
-     * UserDelegate - User-related API communication handler
+     * UserDelegate - User-related API communication handler with IndexedDB caching
      * 
      * This method handles user-related API calls, such as fetching user avatar,
      * profile information, etc. from remote services.
      * 
-     * @param {string} serviceKey - Key to look up BaseURL from ServiceLocator
-     * @param {string} endpoint - API endpoint path for user-related operations
+     * It implements a cache-first strategy:
+     * 1. Check IndexedDB for cached user data
+     * 2. If found, return cached data
+     * 3. If not found, fetch from remote API and cache in IndexedDB
+     * 
+     * @param {string} serviceKey - Key to look up BaseURL from ServiceLocator (e.g., 'metafs')
+     * @param {string} endpoint - API endpoint path (e.g., '/info/metaid/xxx')
      * @param {Object} options - Fetch options (method, headers, body, etc.)
-     * @returns {Promise<Object>} Raw JSON response from the service
+     * @param {string} options.metaid - MetaID to fetch user info for (required)
+     * @returns {Promise<Object>} User data object with avatar image
      * 
      * @example
-     * const avatarData = await IDFramework.Delegate.UserDelegate('metaid_man', '/user/avatar', {
-     *   method: 'GET',
-     *   headers: { 'Authorization': 'Bearer token' }
+     * const userData = await IDFramework.Delegate.UserDelegate('metafs', '/info/metaid/xxx', {
+     *   metaid: '4091a83e631ef80ad55088c80e22e58747671a288aa64441f34d91f5c87532bb'
      * });
      */
     async UserDelegate(serviceKey, endpoint, options = {}) {
-      // TODO: Implement user-related API communication
-      // This method will be used to fetch user avatar and profile information
-      // from remote services.
+      // Extract metaid from options or from endpoint
+      let metaid = options.metaid;
       
-      throw new Error('UserDelegate is not yet implemented');
+      // If metaid not in options, try to extract from endpoint
+      if (!metaid && endpoint) {
+        const match = endpoint.match(/\/info\/metaid\/([^\/]+)/);
+        if (match) {
+          metaid = match[1];
+        }
+      }
+      
+      if (!metaid) {
+        throw new Error('UserDelegate: metaid is required (provide in options.metaid or endpoint)');
+      }
+
+      // Step 1: Check IndexedDB for cached user data
+      try {
+        const cachedUser = await this._getUserFromIndexedDB(metaid);
+        if (cachedUser) {
+          // If cached user has old avatarImg but no avatarUrl, update it
+          if (cachedUser.avatarImg && !cachedUser.avatarUrl) {
+            // Old format - need to rebuild avatarUrl from avatar or avatarId
+            if (cachedUser.avatarId) {
+              cachedUser.avatarUrl = `${window.ServiceLocator[serviceKey]}/v1/users/avatar/accelerate/${cachedUser.avatarId}`;
+            } else if (cachedUser.avatar) {
+              const avatarFileName = cachedUser.avatar.split('/').pop();
+              if (avatarFileName) {
+                cachedUser.avatarUrl = `${window.ServiceLocator[serviceKey]}/v1/users/avatar/accelerate/${avatarFileName}`;
+              }
+            }
+            // Remove old avatarImg field
+            delete cachedUser.avatarImg;
+            // Update cache
+            await this._saveUserToIndexedDB(cachedUser);
+          }
+          // Also check if avatarUrl is missing but we have avatar or avatarId (for cached entries without avatarUrl)
+          if (!cachedUser.avatarUrl && (cachedUser.avatarId || cachedUser.avatar)) {
+            if (cachedUser.avatarId) {
+              cachedUser.avatarUrl = `${window.ServiceLocator[serviceKey]}/v1/users/avatar/accelerate/${cachedUser.avatarId}`;
+            } else if (cachedUser.avatar) {
+              const avatarFileName = cachedUser.avatar.split('/').pop();
+              if (avatarFileName) {
+                cachedUser.avatarUrl = `${window.ServiceLocator[serviceKey]}/v1/users/avatar/accelerate/${avatarFileName}`;
+              }
+            }
+            // Update cache
+            await this._saveUserToIndexedDB(cachedUser);
+          }
+          return cachedUser;
+        }
+      } catch (error) {
+        console.warn('UserDelegate: Error reading from IndexedDB:', error);
+        // Continue to fetch from API
+      }
+
+      // Step 2: Fetch from remote API
+      if (!window.ServiceLocator || !window.ServiceLocator[serviceKey]) {
+        throw new Error(`Service '${serviceKey}' not found in ServiceLocator. Please define it in app.js`);
+      }
+
+      const baseURL = window.ServiceLocator[serviceKey];
+      // Use provided endpoint or construct default endpoint
+      const finalEndpoint = endpoint || `/info/metaid/${metaid}`;
+      const url = `${baseURL}${finalEndpoint}`;
+
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...options.headers,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const userData = await response.json();
+
+        // Extract user info from API response
+        if (userData.code === 1 && userData.data) {
+          const userInfo = userData.data;
+          
+          // Step 3: Store avatar URL (not base64) to avoid CORS issues
+          // We'll use the URL directly in <img> tags, which don't have CORS restrictions
+          // Example correct URL: https://file.metaid.io/metafile-indexer/api/v1/users/avatar/accelerate/dc5284fc2ea18067a3a2f8e50c41825e11c27a71b9574a38ac92d889841e1bc6i0
+          let avatarUrl = null;
+          
+          // Check for avatarId first, then fallback to extracting from avatar path
+          if (userInfo.avatarId) {
+            // Use the accelerate endpoint URL directly
+            avatarUrl = `${baseURL}/v1/users/avatar/accelerate/${userInfo.avatarId}`;
+          } else if (userInfo.avatar) {
+            // Extract avatar ID from avatar path
+            // Example: '/content/c01608381d41661448c5212a4a14282b42d8f46bd257caaa01cd8e2bdd342dd2i0'
+            // We need to extract: 'c01608381d41661448c5212a4a14282b42d8f46bd257caaa01cd8e2bdd342dd2i0'
+            const avatarPath = userInfo.avatar;
+            // Extract the filename part (everything after the last '/')
+            const avatarFileName = avatarPath.split('/').pop();
+            if (avatarFileName) {
+              avatarUrl = `${baseURL}/v1/users/avatar/accelerate/${avatarFileName}`;
+            } else {
+              console.warn(`UserDelegate: Could not extract filename from avatar path: ${avatarPath}`);
+            }
+          }
+
+            // Step 4: Prepare user object for storage
+            const userObject = {
+              globalMetaId: userInfo.globalMetaId || '',
+              metaid: userInfo.metaid || metaid,
+              name: userInfo.name || '',
+              address: userInfo.address || '',
+              avatar: userInfo.avatar || '',
+              avatarId: userInfo.avatarId || '',
+              chatpubkey: userInfo.chatpubkey || '',
+              chatpubkeyId: userInfo.chatpubkeyId || '',
+              avatarUrl: avatarUrl, // Avatar image URL (not base64, to avoid CORS)
+            };
+
+          // Step 5: Store in IndexedDB
+          try {
+            await this._saveUserToIndexedDB(userObject);
+          } catch (error) {
+            console.warn('UserDelegate: Error saving to IndexedDB:', error);
+            // Continue anyway - return the data even if caching fails
+          }
+
+          return userObject;
+        } else {
+          throw new Error(`API returned error: ${userData.message || 'Unknown error'}`);
+        }
+      } catch (error) {
+        console.error(`UserDelegate error for ${serviceKey}${endpoint}:`, error);
+        throw error;
+      }
+    },
+
+    /**
+     * Initialize IndexedDB for user data storage
+     * @returns {Promise<IDBDatabase>} IndexedDB database instance
+     */
+    async _initIndexedDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('idframework-user-db', 1);
+
+        request.onerror = () => {
+          reject(new Error('Failed to open IndexedDB'));
+        };
+
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+          
+          // Create User object store if it doesn't exist
+          if (!db.objectStoreNames.contains('User')) {
+            const objectStore = db.createObjectStore('User', { keyPath: 'metaid' });
+            // Create index for faster lookups
+            objectStore.createIndex('globalMetaId', 'globalMetaId', { unique: false });
+          }
+        };
+      });
+    },
+
+    /**
+     * Get user data from IndexedDB
+     * @param {string} metaid - MetaID to look up
+     * @returns {Promise<Object|null>} User data or null if not found
+     */
+    async _getUserFromIndexedDB(metaid) {
+      try {
+        const db = await this._initIndexedDB();
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction(['User'], 'readonly');
+          const objectStore = transaction.objectStore('User');
+          const request = objectStore.get(metaid);
+
+          request.onsuccess = () => {
+            resolve(request.result || null);
+          };
+
+          request.onerror = () => {
+            reject(new Error('Failed to read from IndexedDB'));
+          };
+        });
+      } catch (error) {
+        console.error('_getUserFromIndexedDB error:', error);
+        return null;
+      }
+    },
+
+    /**
+     * Save user data to IndexedDB
+     * @param {Object} userData - User data object
+     * @returns {Promise<void>}
+     */
+    async _saveUserToIndexedDB(userData) {
+      try {
+        const db = await this._initIndexedDB();
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction(['User'], 'readwrite');
+          const objectStore = transaction.objectStore('User');
+          
+          // Check for existing entry to potentially update its structure
+          const getRequest = objectStore.get(userData.metaid);
+          getRequest.onsuccess = async () => {
+            let existingUser = getRequest.result;
+            let userToStore = { ...userData }; // Start with new object
+
+            if (existingUser) {
+              // If old entry has avatarImg but not avatarUrl, migrate it
+              if (existingUser.avatarImg && !existingUser.avatarUrl && userData.avatarUrl) {
+                userToStore.avatarUrl = userData.avatarUrl;
+                delete userToStore.avatarImg; // Remove old field
+              }
+              // Merge existing data with new data, prioritizing new data
+              userToStore = { ...existingUser, ...userToStore };
+            }
+
+            const putRequest = objectStore.put(userToStore); // Use put to add or update
+
+            putRequest.onerror = () => {
+              reject(new Error('Failed to save to IndexedDB'));
+            };
+
+            putRequest.onsuccess = () => {
+              resolve();
+            };
+          };
+          getRequest.onerror = () => {
+            reject(new Error('Error checking existing user in IndexedDB'));
+          };
+        });
+      } catch (error) {
+        console.error('_saveUserToIndexedDB error:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Clear all cached user data from IndexedDB
+     * This is useful for debugging or when cache structure changes
+     * Usage: IDFramework.Delegate.UserDelegate.clearUserCache()
+     */
+    async clearUserCache() {
+      try {
+        const db = await this._initIndexedDB();
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction(['User'], 'readwrite');
+          const objectStore = transaction.objectStore('User');
+          const request = objectStore.clear();
+
+          request.onerror = () => {
+            reject(new Error('Error clearing user cache from IndexedDB'));
+          };
+
+          request.onsuccess = () => {
+            resolve();
+          };
+        });
+      } catch (error) {
+        console.error('clearUserCache error:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Convert Blob to Data URL (Base64)
+     * @param {Blob} blob - Blob to convert
+     * @returns {Promise<string>} Data URL string
+     */
+    async _blobToDataURL(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
     },
   };
 
@@ -283,7 +566,8 @@ class IDFramework {
           await builtInCommand({
             payload,
             stores,
-            delegate: IDFramework.Delegate.BusinessDelegate,
+            delegate: IDFramework.Delegate.BusinessDelegate.bind(IDFramework.Delegate),
+            userDelegate: IDFramework.Delegate.UserDelegate.bind(IDFramework.Delegate),
           });
           return;
         } catch (error) {
@@ -312,18 +596,25 @@ class IDFramework {
         const command = new CommandClass();
         
         // Resolve stores if not provided
+        // Include all registered stores (wallet, app, buzz, user, chat, etc.)
         if (!stores) {
           stores = {
             wallet: Alpine.store('wallet'),
             app: Alpine.store('app'),
+            buzz: Alpine.store('buzz'),
+            user: Alpine.store('user'),
+            chat: Alpine.store('chat'),
           };
         }
         
         // Execute command with Delegate and stores
+        // Commands can use either BusinessDelegate or UserDelegate
+        // Bind UserDelegate to Delegate object to ensure 'this' context is correct
         await command.execute({
           payload,
           stores,
-          delegate: IDFramework.Delegate.BusinessDelegate,
+          delegate: IDFramework.Delegate.BusinessDelegate.bind(IDFramework.Delegate),
+          userDelegate: IDFramework.Delegate.UserDelegate.bind(IDFramework.Delegate),
         });
       } catch (error) {
         console.error(`Error executing command for event '${eventName}':`, error);
@@ -371,6 +662,17 @@ class IDFramework {
             stores.wallet.metaid = result.metaid || result.address;
             stores.wallet.publicKey = await window.metaidwallet.getPublicKey();
             stores.wallet.network = await window.metaidwallet.getNetwork();
+            
+            // Get GlobalMetaID for cross-chain identity
+            try {
+              const globalMetaIdResult = await window.metaidwallet.getGlobalMetaid();
+              if (globalMetaIdResult && globalMetaIdResult.mvc) {
+                stores.wallet.globalMetaId = globalMetaIdResult.mvc.globalMetaId;
+                stores.wallet.globalMetaIdInfo = globalMetaIdResult; // Store full info (mvc, btc, doge)
+              }
+            } catch (e) {
+              console.warn('Failed to get GlobalMetaID:', e);
+            }
           } catch (e) {
             console.warn('Failed to get additional wallet info:', e);
           }
@@ -480,146 +782,7 @@ class IDFramework {
    * that are handled by routing commands (e.g., NavigateCommand).
    */
 
-  /**
-   * IDRouter - Hash-based Router
-   * 
-   * Handles route matching, parameter extraction, and dispatches ROUTE_CHANGE events.
-   */
-  static IDRouter = {
-    /**
-     * Route configuration array
-     * @type {Array<{path: string, view: string}>}
-     */
-    routes: [],
-
-    /**
-     * Initialize the router with route configuration
-     * 
-     * @param {Array<{path: string, view: string}>} routes - Route configuration
-     * @example
-     * IDFramework.IDRouter.init([
-     *   { path: '/', view: 'home' },
-     *   { path: '/profile/:id', view: 'profile' }
-     * ]);
-     */
-    init(routes = []) {
-      this.routes = routes;
-      
-      // Listen to hash changes
-      window.addEventListener('hashchange', () => {
-        this.handleRouteChange();
-      });
-      
-      // Handle initial load
-      window.addEventListener('load', () => {
-        this.handleRouteChange();
-      });
-      
-      // Also handle initial hash if present
-      if (window.location.hash) {
-        this.handleRouteChange();
-      }
-    },
-
-    /**
-     * Match a path against route patterns and extract parameters
-     * 
-     * @param {string} path - The path to match (e.g., '/profile/123')
-     * @param {string} pattern - The route pattern (e.g., '/profile/:id')
-     * @returns {Object|null} - Matched route with params, or null if no match
-     */
-    matchRoute(path, pattern) {
-      // Remove leading/trailing slashes and hash
-      const normalizePath = (p) => p.replace(/^#?\/?/, '').replace(/\/$/, '');
-      const normalizedPath = normalizePath(path);
-      const normalizedPattern = normalizePath(pattern);
-      
-      // Split into segments
-      const pathSegments = normalizedPath.split('/').filter(Boolean);
-      const patternSegments = normalizedPattern.split('/').filter(Boolean);
-      
-      // Must have same number of segments
-      if (pathSegments.length !== patternSegments.length) {
-        return null;
-      }
-      
-      const params = {};
-      for (let i = 0; i < patternSegments.length; i++) {
-        const patternSegment = patternSegments[i];
-        const pathSegment = pathSegments[i];
-        
-        // Check if this is a parameter (starts with :)
-        if (patternSegment.startsWith(':')) {
-          const paramName = patternSegment.slice(1);
-          params[paramName] = pathSegment;
-        } else if (patternSegment !== pathSegment) {
-          // Literal segment doesn't match
-          return null;
-        }
-      }
-      
-      return { params, pattern };
-    },
-
-    /**
-     * Find matching route for current hash
-     * 
-     * @returns {Object|null} - Matched route with view and params, or null
-     */
-    findRoute() {
-      const hash = window.location.hash || '#/';
-      const path = hash.replace(/^#/, '') || '/';
-      
-      // Try to match against each route
-      for (const route of this.routes) {
-        const match = this.matchRoute(path, route.path);
-        if (match) {
-          return {
-            view: route.view,
-            params: match.params,
-            path: path,
-          };
-        }
-      }
-      
-      // No match found
-      return null;
-    },
-
-    /**
-     * Handle route change event
-     * Dispatches ROUTE_CHANGE event instead of directly updating the view
-     */
-    async handleRouteChange() {
-      const matchedRoute = this.findRoute();
-      
-      if (matchedRoute) {
-        // Dispatch ROUTE_CHANGE event - let NavigateCommand handle the view update
-        await IDFramework.dispatch('ROUTE_CHANGE', {
-          view: matchedRoute.view,
-          params: matchedRoute.params,
-          path: matchedRoute.path,
-        });
-      } else {
-        // No route matched - could dispatch a 404 event or default route
-        console.warn('No route matched for:', window.location.hash);
-      }
-    },
-
-    /**
-     * Programmatically navigate to a new route
-     * 
-     * @param {string} path - Path to navigate to (e.g., '/home' or '/profile/123')
-     * @example
-     * await IDFramework.router.push('/profile/123');
-     */
-    async push(path) {
-      // Ensure path starts with /
-      const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-      window.location.hash = normalizedPath;
-      // hashchange event will trigger handleRouteChange
-    },
-  };
+  
 
   /**
    * ============================================
@@ -691,6 +854,11 @@ class IDFramework {
         stores[name] = store;
       }
     });
+    
+    // Ensure user store is always included for user-related commands
+    if (!stores.user && Alpine.store('user')) {
+      stores.user = Alpine.store('user');
+    }
 
     // If specific store requested, add it (even if not in common list)
     if (storeName && Alpine.store(storeName)) {

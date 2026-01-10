@@ -57,6 +57,26 @@ export default class FetchBuzzCommand {
       store.list = parsedData;
       store.isLoading = false;
       store.error = null;
+
+      // Fetch user information for each unique author in the list
+      // This ensures user avatars and names are available for display
+      if (parsedData.length > 0 && stores.user) {
+        const uniqueMetaIds = [...new Set(parsedData.map(item => item.author).filter(Boolean))];
+        
+        for (const metaid of uniqueMetaIds) {
+          // Only fetch if not already in store
+          if (!stores.user.users[metaid]) {
+            // Dispatch fetchUser command asynchronously (don't await to avoid blocking)
+            IDFramework.dispatch('fetchUser', { metaid }).catch(err => {
+              console.warn(`Failed to fetch user info for ${metaid}:`, err);
+            });
+          }
+        }
+      } else {
+        if (!stores.user) {
+          console.warn('FetchBuzzCommand: User store not available');
+        }
+      }
     } catch (error) {
       console.error('FetchBuzzCommand error:', error);
       store.error = error.message || 'Failed to fetch buzz';

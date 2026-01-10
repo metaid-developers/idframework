@@ -79,9 +79,22 @@ class IdConnectButton extends HTMLElement {
           
           // Dispatch custom event for external listeners
           this.dispatchEvent(new CustomEvent('connected', {
-            detail: { address: walletStore.address },
+            detail: { 
+              address: walletStore.address,
+              globalMetaId: walletStore.globalMetaId 
+            },
             bubbles: true
           }));
+          
+          // Auto-fetch chat list if in chat app
+          if (walletStore.globalMetaId && window.IDFramework) {
+            // Wait a bit for globalMetaId to be fully set
+            setTimeout(() => {
+              window.IDFramework.dispatch('fetchChatList').catch(err => {
+                console.warn('Failed to auto-fetch chat list:', err);
+              });
+            }, 500);
+          }
         }
       } else {
         throw new Error('IDFramework is not available');
