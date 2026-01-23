@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+<!-- 移动端优化 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
+<!-- 缓存策略：允许缓存静态资源，但 HTML 页面本身不缓存 -->
+<!-- <meta http-equiv="Cache-Control" content="public, max-age=31536000">
+<meta http-equiv="Pragma" content="public"> -->
+<title>Tetris</title>
+
+
+
+<!-- Alpine.js CDN -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<!-- Initialize Alpine Stores BEFORE Alpine processes DOM -->
+<!-- This ensures stores are available even if framework loads after alpine:init -->
+<script>
+// CRITICAL: Register stores in alpine:init event
+// This event fires BEFORE Alpine processes the DOM, ensuring stores are available
+window.addEventListener('alpine:init', () => {
+// ============================================
+// localStorage Helper Functions
+// ============================================
+const StorageHelper = {
+  // Save wallet store to localStorage
+  saveWallet: (walletData) => {
+    try {
+      localStorage.setItem('idframework_wallet', JSON.stringify(walletData));
+    } catch (error) {
+      console.error('Failed to save wallet to localStorage:', error);
+    }
+  },
+  
+  // Load wallet store from localStorage
+  loadWallet: () => {
+    try {
+      const stored = localStorage.getItem('idframework_wallet');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (error) {
+      console.error('Failed to load wallet from localStorage:', error);
+    }
+    return null;
+  },
+  
+  // Save app store (isLogin, userAddress) to localStorage
+  saveApp: (isLogin, userAddress) => {
+    try {
+      localStorage.setItem('idframework_app_isLogin', JSON.stringify(isLogin));
+      localStorage.setItem('idframework_app_userAddress', JSON.stringify(userAddress));
+    } catch (error) {
+      console.error('Failed to save app to localStorage:', error);
+    }
+  },
+  
+  // Load app store (isLogin, userAddress) from localStorage
+  loadApp: () => {
+    try {
+      const isLogin = localStorage.getItem('idframework_app_isLogin');
+      const userAddress = localStorage.getItem('idframework_app_userAddress');
+      return {
+        isLogin: isLogin !== null ? JSON.parse(isLogin) : false,
+        userAddress: userAddress !== null ? JSON.parse(userAddress) : null,
+      };
+    } catch (error) {
+      console.error('Failed to load app from localStorage:', error);
+      return { isLogin: false, userAddress: null };
+    }
+  },
+  
+  // Save user store (users) to localStorage
+  saveUser: (users) => {
+    try {
+      localStorage.setItem('idframework_user_users', JSON.stringify(users));
+    } catch (error) {
+      console.error('Failed to save user to localStorage:', error);
+    }
+  },
+  
+  // Load user store (users) from localStorage
+  loadUser: () => {
+    try {
+      const stored = localStorage.getItem('idframework_user_users');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (error) {
+      console.error('Failed to load user from localStorage:', error);
+    }
+    return null;
+  },
+};
+
+// ============================================
+// Initialize Stores with localStorage Data
+// ============================================
+// Load data from localStorage
+const savedWallet = StorageHelper.loadWallet();
+const savedApp = StorageHelper.loadApp();
+const savedUsers = StorageHelper.loadUser();
+
+// Create a function to wrap store with localStorage sync using Proxy
+const createPersistedStore = (storeData, syncCallback, nestedProps = []) => {
+  // Create a Proxy to intercept property changes
+  const handler = {
+    set(target, property, value) {
+      // Set the property
+      const result = Reflect.set(target, property, value);
+      // Sync to localStorage after property is set
+      syncCallback(target);
+      return result;
+    },
+    get(target, property) {
+      const value = Reflect.get(target, property);
+      // If accessing nested objects that need persistence, wrap them too
+      if (value && typeof value === 'object' && !Array.isArray(value) && nestedProps.includes(property)) {
+        // Create a nested proxy for the nested object
+        const nestedHandler = {
+          set(nestedTarget, nestedProperty, nestedValue) {
+            const result = Reflect.set(nestedTarget, nestedProperty, nestedValue);
+            // Sync parent store when nested property changes
+            syncCallback(target);
+            return result;
+          },
+          get(nestedTarget, nestedProperty) {
+            return Reflect.get(nestedTarget, nestedProperty);
+          },
+          deleteProperty(nestedTarget, nestedProperty) {
+            const result = Reflect.deleteProperty(nestedTarget, nestedProperty);
+            syncCallback(target);
+            return result;
+          }
+        };
+        return new Proxy(value, nestedHandler);
+      }
+      return value;
+    },
+    deleteProperty(target, property) {
+      const result = Reflect.deleteProperty(target, property);
+      syncCallback(target);
+      return result;
+    }
+  };
+  
+  // Return proxied store data
+  return new Proxy(storeData, handler);
+};
+
+// Initialize wallet store with Proxy for localStorage sync
+const walletStoreData = {
+  isConnected: savedWallet?.isConnected ?? false,
+  address: savedWallet?.address ?? null,
+  publicKey: savedWallet?.publicKey ?? null,
+  network: savedWallet?.network ?? null,
+};
+const proxiedWalletStore = createPersistedStore(walletStoreData, (store) => {
+  
+  StorageHelper.saveWallet({
+    isConnected: store.isConnected,
+    address: store.address,
+    publicKey: store.publicKey,
+    network: store.network,
+    globalMetaId:store.globalMetaId
+  });
+});
+Alpine.store('wallet', proxiedWalletStore);
+
+// Initialize app store with Proxy for localStorage sync (only isLogin and userAddress)
+const appStoreData = {
+  isLogin: savedApp.isLogin,
+  userAddress: savedApp.userAddress,
+  isWebView: false, // WebView detection flag (not persisted)
+  // Routing state (not persisted)
+  currentView: null,
+  routeParams: {},
+  currentPath: '/',
+};
+const proxiedAppStore = createPersistedStore(appStoreData, (store) => {
+  
+  // Only save isLogin and userAddress
+  StorageHelper.saveApp(store.isLogin, store.userAddress);
+});
+
+
+Alpine.store('app', proxiedAppStore);
+
+// Initialize user store with Proxy for localStorage sync (only users)
+const userStoreData = {
+  user: savedUsers ?? {},
+  isLoading: false,
+  error: null,
+};
+
+const proxiedUserStore = createPersistedStore(
+  userStoreData, 
+  (store) => {
+    
+    // Only save users
+    StorageHelper.saveUser(store.user);
+  },
+  ['user'] // Enable nested proxy for users object
+);
+Alpine.store('user', proxiedUserStore);
+
+// If framework is already loaded, call init to ensure consistency
+if (window.IDFramework) {
+IDFramework.initModels({
+
+});
+}
+});
+</script>
+
+<!-- UnoCSS Runtime CDN -->
+<script>
+window.__unocss = {
+theme: {},
+shortcuts: {},
+rules: [],
+};
+</script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@unocss/runtime"></script>
+  <!-- Global Styles -->
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <!-- Import IDFramework Core -->
+  <script type="module" src="./idframework.js" ></script>
+  
+  <!-- Import Web Components (only essential ones at startup) -->
+  <!-- id-buzz-card.js and id-post-buzz-panel.js are loaded dynamically on demand -->
+  <script type="module" src="./idcomponents/id-connect-button.js" ></script>
+  
+  <!-- Import App Configuration -->
+  <script type="module" src="./app.js"></script>
+
+  <div class="connect-button-wrapper">
+    <id-connect-button></id-connect-button>
+  </div>
+
+  <div class="container" x-data="tetrisGame()">
+    <div class="game-container" style="display: flex; gap: 20px; justify-content: center; align-items: flex-start; padding: 20px;">
+      <!-- Game Board -->
+      <div class="game-board-wrapper">
+        <canvas id="game-board" width="300" height="600" style="border: 2px solid #333; background: #000; display: block;"></canvas>
+      </div>
+      
+      <!-- Sidebar -->
+      <div class="game-sidebar" style="display: flex; flex-direction: column; gap: 20px; min-width: 150px;">
+        <!-- Next Piece Preview -->
+        <div class="next-piece" style="background: #f0f0f0; padding: 15px; border-radius: 8px; border: 2px solid #333;">
+          <h3 style="margin: 0 0 10px 0; font-size: 16px; font-weight: bold;">Next</h3>
+          <canvas id="next-piece" width="120" height="120" style="border: 1px solid #ccc; background: #fff; display: block;"></canvas>
+        </div>
+        
+        <!-- Score Display -->
+        <div class="score-display" style="background: #f0f0f0; padding: 15px; border-radius: 8px; border: 2px solid #333;">
+          <h3 style="margin: 0 0 10px 0; font-size: 16px; font-weight: bold;">Score</h3>
+          <div style="font-size: 24px; font-weight: bold; color: #333;" x-text="score">0</div>
+        </div>
+        
+        <!-- Difficulty Selection -->
+        <div class="difficulty-selection" x-show="!isPlaying && !gameOver && !selectedDifficulty" style="background: #f0f0f0; padding: 15px; border-radius: 8px; border: 2px solid #333;">
+          <h3 style="margin: 0 0 10px 0; font-size: 16px; font-weight: bold;">Select Difficulty</h3>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <button @click="selectDifficulty('easy')" style="padding: 8px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Easy</button>
+            <button @click="selectDifficulty('medium')" style="padding: 8px; background: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Medium</button>
+            <button @click="selectDifficulty('hard')" style="padding: 8px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Hard</button>
+          </div>
+        </div>
+        
+        <!-- Game Controls -->
+        <div class="game-controls" style="display: flex; flex-direction: column; gap: 10px;">
+          <button @click="startGame()" x-show="!isPlaying && !gameOver && selectedDifficulty" style="padding: 10px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Start Game</button>
+          <button @click="pauseGame()" x-show="isPlaying && !isPaused" style="padding: 10px; background: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Pause</button>
+          <button @click="resumeGame()" x-show="isPaused" style="padding: 10px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Resume</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Game Over Modal -->
+    <div x-show="showGameOverModal" 
+         x-cloak
+         style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;">
+      <div style="background: white; padding: 30px; border-radius: 12px; max-width: 400px; width: 90%; text-align: center; position: relative;">
+        <h2 style="margin: 0 0 20px 0; font-size: 24px; color: #333;">Game Over!</h2>
+        <p style="margin: 0 0 20px 0; font-size: 18px; color: #666;">Final Score: <strong x-text="score"></strong></p>
+        <p style="margin: 0 0 30px 0; font-size: 14px; color: #999;">Would you like to record this score on-chain?</p>
+        <div style="display: flex; gap: 10px; justify-content: center;">
+          <button @click="cancelRecordScore()" style="padding: 10px 20px; background: #ccc; color: #333; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">Cancel</button>
+          <button @click="confirmRecordScore()" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    function tetrisGame() {
+      return {
+        board: [],
+        boardWidth: 10,
+        boardHeight: 20,
+        currentPiece: null,
+        nextPiece: null,
+        score: 0,
+        isPlaying: false,
+        isPaused: false,
+        gameOver: false,
+        showGameOverModal: false,
+        gameLoop: null,
+        dropCounter: 0,
+        dropInterval: 1000,
+        lastTime: 0,
+        selectedDifficulty: null,
+        difficulty: 'easy',
+        bottomRiseCounter: 0,
+        bottomRiseInterval: 5000, // 5 seconds default
+        bottomRiseSpeed: 500, // milliseconds per row rise
+        
+        // Tetris pieces (7 classic pieces)
+        pieces: [
+          // I piece
+          [
+            [0,0,0,0],
+            [1,1,1,1],
+            [0,0,0,0],
+            [0,0,0,0]
+          ],
+          // O piece
+          [
+            [1,1],
+            [1,1]
+          ],
+          // T piece
+          [
+            [0,1,0],
+            [1,1,1],
+            [0,0,0]
+          ],
+          // S piece
+          [
+            [0,1,1],
+            [1,1,0],
+            [0,0,0]
+          ],
+          // Z piece
+          [
+            [1,1,0],
+            [0,1,1],
+            [0,0,0]
+          ],
+          // J piece
+          [
+            [1,0,0],
+            [1,1,1],
+            [0,0,0]
+          ],
+          // L piece
+          [
+            [0,0,1],
+            [1,1,1],
+            [0,0,0]
+          ]
+        ],
+        
+        // Colors for each piece type
+        pieceColors: [
+          '#00f0f0', // I - Cyan
+          '#f0f000', // O - Yellow
+          '#a000f0', // T - Purple
+          '#00f000', // S - Green
+          '#f00000', // Z - Red
+          '#0000f0', // J - Blue
+          '#f0a000'  // L - Orange
+        ],
+        
+        init() {
+          this.initBoard();
+          this.setupKeyboard();
+          this.draw();
+        },
+        
+        initBoard() {
+          this.board = Array(this.boardHeight).fill().map(() => Array(this.boardWidth).fill(0));
+        },
+        
+        selectDifficulty(level) {
+          this.selectedDifficulty = true;
+          this.difficulty = level;
+          
+          // Set difficulty parameters
+          switch(level) {
+            case 'easy':
+              this.dropInterval = 1000; // 1 second
+              this.bottomRiseInterval = 8000; // 8 seconds
+              this.bottomRiseSpeed = 800; // slower rise
+              break;
+            case 'medium':
+              this.dropInterval = 600; // 0.6 seconds
+              this.bottomRiseInterval = 5000; // 5 seconds
+              this.bottomRiseSpeed = 500; // medium rise
+              break;
+            case 'hard':
+              this.dropInterval = 300; // 0.3 seconds
+              this.bottomRiseInterval = 3000; // 3 seconds
+              this.bottomRiseSpeed = 300; // faster rise
+              break;
+          }
+        },
+        
+        createPiece(type) {
+          return {
+            matrix: this.pieces[type],
+            x: Math.floor(this.boardWidth / 2) - Math.floor(this.pieces[type][0].length / 2),
+            y: 0,
+            type: type,
+            color: this.pieceColors[type]
+          };
+        },
+        
+        startGame() {
+          if (!this.selectedDifficulty) return;
+          
+          this.initBoard();
+          this.score = 0;
+          this.isPlaying = true;
+          this.isPaused = false;
+          this.gameOver = false;
+          this.showGameOverModal = false;
+          this.bottomRiseCounter = 0;
+          this.currentPiece = this.createPiece(Math.floor(Math.random() * this.pieces.length));
+          this.nextPiece = this.createPiece(Math.floor(Math.random() * this.pieces.length));
+          this.lastTime = performance.now();
+          this.gameLoop = requestAnimationFrame((time) => this.update(time));
+        },
+        
+        pauseGame() {
+          this.isPaused = true;
+          if (this.gameLoop) {
+            cancelAnimationFrame(this.gameLoop);
+            this.gameLoop = null;
+          }
+        },
+        
+        resumeGame() {
+          this.isPaused = false;
+          this.lastTime = performance.now();
+          this.gameLoop = requestAnimationFrame((time) => this.update(time));
+        },
+        
+        update(time) {
+          if (!this.isPlaying || this.isPaused || this.gameOver) return;
+          
+          const deltaTime = time - this.lastTime;
+          this.lastTime = time;
+          this.dropCounter += deltaTime;
+          this.bottomRiseCounter += deltaTime;
+          
+          if (this.dropCounter > this.dropInterval) {
+            this.dropPiece();
+            this.dropCounter = 0;
+          }
+          
+          // Bottom rise mechanism - add random blocks from bottom
+          if (this.bottomRiseCounter > this.bottomRiseInterval) {
+            this.riseBottomRow();
+            this.bottomRiseCounter = 0;
+          }
+          
+          this.draw();
+          this.gameLoop = requestAnimationFrame((time) => this.update(time));
+        },
+        
+        riseBottomRow() {
+          // Check if top row has blocks (game over condition)
+          if (this.board[0].some(cell => cell !== 0)) {
+            this.endGame();
+            return;
+          }
+          
+          // Remove top row
+          this.board.shift();
+          
+          // Create new bottom row with random blocks
+          const newRow = Array(this.boardWidth).fill(0);
+          // Randomly fill 30-50% of the row with blocks
+          const fillCount = Math.floor(this.boardWidth * (0.3 + Math.random() * 0.2));
+          const filledPositions = new Set();
+          
+          while (filledPositions.size < fillCount) {
+            const pos = Math.floor(Math.random() * this.boardWidth);
+            filledPositions.add(pos);
+          }
+          
+          // Fill positions with random piece types (1-7)
+          filledPositions.forEach(pos => {
+            newRow[pos] = Math.floor(Math.random() * 7) + 1;
+          });
+          
+          // Add new row at bottom
+          this.board.push(newRow);
+        },
+        
+        dropPiece() {
+          this.currentPiece.y++;
+          if (this.collision(this.currentPiece)) {
+            this.currentPiece.y--;
+            this.mergePiece();
+            this.clearLines();
+            this.currentPiece = this.nextPiece;
+            this.nextPiece = this.createPiece(Math.floor(Math.random() * this.pieces.length));
+            
+            if (this.collision(this.currentPiece)) {
+              this.endGame();
+            }
+          }
+        },
+        
+        collision(piece) {
+          for (let y = 0; y < piece.matrix.length; y++) {
+            for (let x = 0; x < piece.matrix[y].length; x++) {
+              if (piece.matrix[y][x]) {
+                const newX = piece.x + x;
+                const newY = piece.y + y;
+                
+                if (newX < 0 || newX >= this.boardWidth || 
+                    newY >= this.boardHeight ||
+                    (newY >= 0 && this.board[newY][newX])) {
+                  return true;
+                }
+              }
+            }
+          }
+          return false;
+        },
+        
+        mergePiece() {
+          for (let y = 0; y < this.currentPiece.matrix.length; y++) {
+            for (let x = 0; x < this.currentPiece.matrix[y].length; x++) {
+              if (this.currentPiece.matrix[y][x]) {
+                const boardY = this.currentPiece.y + y;
+                const boardX = this.currentPiece.x + x;
+                if (boardY >= 0) {
+                  this.board[boardY][boardX] = this.currentPiece.type + 1;
+                }
+              }
+            }
+          }
+        },
+        
+        clearLines() {
+          let linesCleared = 0;
+          for (let y = this.boardHeight - 1; y >= 0; y--) {
+            if (this.board[y].every(cell => cell !== 0)) {
+              this.board.splice(y, 1);
+              this.board.unshift(Array(this.boardWidth).fill(0));
+              linesCleared++;
+              y++;
+            }
+          }
+          
+          if (linesCleared > 0) {
+            this.score += linesCleared * 100;
+            // Check if board is completely empty (all blocks cleared)
+            const allEmpty = this.board.every(row => row.every(cell => cell === 0));
+            if (allEmpty) {
+              this.endGame();
+            }
+          }
+        },
+        
+        rotatePiece() {
+          const rotated = this.currentPiece.matrix[0].map((_, i) =>
+            this.currentPiece.matrix.map(row => row[i]).reverse()
+          );
+          const original = this.currentPiece.matrix;
+          this.currentPiece.matrix = rotated;
+          
+          if (this.collision(this.currentPiece)) {
+            this.currentPiece.matrix = original;
+          }
+        },
+        
+        movePiece(dx) {
+          this.currentPiece.x += dx;
+          if (this.collision(this.currentPiece)) {
+            this.currentPiece.x -= dx;
+          }
+        },
+        
+        setupKeyboard() {
+          document.addEventListener('keydown', (e) => {
+            if (!this.isPlaying || this.isPaused || this.gameOver) return;
+            
+            switch(e.key) {
+              case 'ArrowLeft':
+                e.preventDefault();
+                this.movePiece(-1);
+                break;
+              case 'ArrowRight':
+                e.preventDefault();
+                this.movePiece(1);
+                break;
+              case 'ArrowDown':
+                e.preventDefault();
+                this.dropPiece();
+                break;
+              case 'ArrowUp':
+              case ' ':
+                e.preventDefault();
+                this.rotatePiece();
+                break;
+            }
+            this.draw();
+          });
+        },
+        
+        draw() {
+          const boardCanvas = document.getElementById('game-board');
+          const nextCanvas = document.getElementById('next-piece');
+          
+          if (!boardCanvas || !nextCanvas) return;
+          
+          const ctx = boardCanvas.getContext('2d');
+          const nextCtx = nextCanvas.getContext('2d');
+          
+          const cellSize = boardCanvas.width / this.boardWidth;
+          
+          // Clear board
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+          
+          // Draw board
+          for (let y = 0; y < this.boardHeight; y++) {
+            for (let x = 0; x < this.boardWidth; x++) {
+              if (this.board[y][x]) {
+                ctx.fillStyle = this.pieceColors[this.board[y][x] - 1];
+                ctx.fillRect(x * cellSize, y * cellSize, cellSize - 1, cellSize - 1);
+              }
+            }
+          }
+          
+          // Draw current piece
+          if (this.currentPiece) {
+            ctx.fillStyle = this.currentPiece.color;
+            for (let y = 0; y < this.currentPiece.matrix.length; y++) {
+              for (let x = 0; x < this.currentPiece.matrix[y].length; x++) {
+                if (this.currentPiece.matrix[y][x]) {
+                  const drawX = (this.currentPiece.x + x) * cellSize;
+                  const drawY = (this.currentPiece.y + y) * cellSize;
+                  ctx.fillRect(drawX, drawY, cellSize - 1, cellSize - 1);
+                }
+              }
+            }
+          }
+          
+          // Draw next piece
+          nextCtx.fillStyle = '#fff';
+          nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+          
+          if (this.nextPiece) {
+            const nextCellSize = 30;
+            const offsetX = (nextCanvas.width - this.nextPiece.matrix[0].length * nextCellSize) / 2;
+            const offsetY = (nextCanvas.height - this.nextPiece.matrix.length * nextCellSize) / 2;
+            
+            nextCtx.fillStyle = this.nextPiece.color;
+            for (let y = 0; y < this.nextPiece.matrix.length; y++) {
+              for (let x = 0; x < this.nextPiece.matrix[y].length; x++) {
+                if (this.nextPiece.matrix[y][x]) {
+                  nextCtx.fillRect(
+                    offsetX + x * nextCellSize,
+                    offsetY + y * nextCellSize,
+                    nextCellSize - 1,
+                    nextCellSize - 1
+                  );
+                }
+              }
+            }
+          }
+        },
+        
+        endGame() {
+          this.isPlaying = false;
+          this.gameOver = true;
+          if (this.gameLoop) {
+            cancelAnimationFrame(this.gameLoop);
+            this.gameLoop = null;
+          }
+          this.showGameOverModal = true;
+        },
+        
+        cancelRecordScore() {
+          this.showGameOverModal = false;
+          this.selectedDifficulty = null; // Reset difficulty selection
+        },
+        
+        async confirmRecordScore() {
+          try {
+            this.showGameOverModal = false;
+            
+            if (!window.IDFramework) {
+              alert('IDFramework is not available');
+              this.selectedDifficulty = null; // Reset difficulty selection
+              return;
+            }
+            
+            const pinRes = await window.IDFramework.dispatch('gameScores', {
+              metaAppPinId: "216b03ab90a0743a39c9d2e44bb31c9a0600ff16b16580a835101578a7e11e63i0",
+              score: this.score,
+              gameName: "Tetris",
+              metaData:{}
+            });
+            
+            console.log('Score recorded:', pinRes);
+            alert(`Score recorded successfully!`);
+            this.selectedDifficulty = null; // Reset difficulty selection
+          } catch (error) {
+            console.error('Failed to record score:', error);
+            alert('Failed to record score: ' + (error.message || error));
+            this.selectedDifficulty = null; // Reset difficulty selection
+          }
+        }
+      };
+    }
+  </script>
+
+  <!-- App Environment Compatibility Script -->
+  <script>
+    // App environment compatibility logic
+    (function() {
+      let accountInterval = null;
+      let retryCount = 0;
+      const RETRY_INTERVAL = 100; // 100ms
+      const MAX_RETRY_TIME = 5000; // 5 seconds
+      let timeoutId = null;
+
+      // Helper function to show toast/alert
+      function showWarning(message) {
+        console.warn(message);
+        // You can replace this with a proper toast library if needed
+        alert(message);
+      }
+
+      // Helper function to reload page
+      function completeReload() {
+        window.location.reload();
+      }
+
+      // Helper function to sleep
+      function sleep(ms = 1000) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+      // Get connect button element
+      function getConnectButton() {
+        return document.querySelector('id-connect-button');
+      }
+
+      // Connect Metalet handler
+      async function connectMetalet() {
+        const connectButton = getConnectButton();
+        if (connectButton && typeof connectButton.handleConnect === 'function') {
+          try {
+            await connectButton.handleConnect();
+          } catch (error) {
+            console.error('Failed to connect Metalet:', error);
+            showWarning(error.message || 'Failed to connect Metalet wallet');
+          }
+        }
+      }
+
+      // Disconnect handler
+      async function disconnectMetalet() {
+        const connectButton = getConnectButton();
+        if (connectButton && typeof connectButton.handleDisconnect === 'function') {
+          connectButton.handleDisconnect();
+        }
+      }
+
+      // Metalet accounts changed handler
+      const metaletAccountsChangedHandler = async () => {
+        try {
+          const appStore = Alpine.store('app');
+          if (appStore && appStore.isWebView) return;
+
+          await disconnectMetalet();
+          showWarning('Metalet 账户已变更。正在刷新页面...');
+          await sleep();
+          completeReload();
+        } catch (error) {
+          console.error('Error in metaletAccountsChangedHandler:', error);
+        }
+      };
+
+      // Metalet network changed handler
+      const metaletNetworkChangedHandler = (network) => {
+        const walletStore = Alpine.store('wallet');
+        if (!walletStore || !walletStore.isConnected) return;
+        
+        const appStore = Alpine.store('app');
+        if (appStore && appStore.isWebView) return;
+        
+        // Handle network change if needed
+        console.log('Network changed:', network);
+      };
+
+      // App login success handler
+      const appLoginSuccessHandler = async (data) => {
+        try {
+          const walletStore = Alpine.store('wallet');
+          if (!walletStore || walletStore.isConnected) {
+            return;
+          }
+
+          await connectMetalet();
+        } catch (error) {
+          console.error('Error in appLoginSuccessHandler:', error);
+          showWarning(error.message || 'Failed to handle login success');
+        }
+      };
+
+      // App account switch handler
+      const appAccountSwitchHandler = async (data) => {
+        try {
+          const appStore = Alpine.store('app');
+          if (!appStore || !appStore.isWebView) return;
+
+          await disconnectMetalet();
+          await connectMetalet();
+        } catch (error) {
+          console.error('Error in appAccountSwitchHandler:', error);
+          throw new Error(error);
+        }
+      };
+
+      // App logout handler
+      const appLogoutHandler = async (data) => {
+        try {
+          console.log('退出登录成功', data);
+          const walletStore = Alpine.store('wallet');
+          if (walletStore && walletStore.isConnected) {
+            await disconnectMetalet();
+          }
+        } catch (error) {
+          console.error('Error in appLogoutHandler:', error);
+        }
+      };
+
+      // Setup Metalet event listeners
+      const checkMetalet = () => {
+        // Check WebView bridge first
+        if (window.IDFramework) {
+          window.IDFramework.dispatch('checkWebViewBridge').catch(err => {
+            console.warn('Failed to check WebView bridge:', err);
+          });
+        }
+
+        if (window.metaidwallet) {
+          try {
+            // Setup event listeners
+            if (window.metaidwallet.on) {
+              window.metaidwallet.on('accountsChanged', metaletAccountsChangedHandler);
+              window.metaidwallet.on('LoginSuccess', appLoginSuccessHandler);
+              window.metaidwallet.on('onAccountSwitch', appAccountSwitchHandler);
+              window.metaidwallet.on('Logout', appLogoutHandler);
+              window.metaidwallet.on('networkChanged', metaletNetworkChangedHandler);
+            }
+          } catch (err) {
+            console.error('Failed to setup Metalet listeners:', err);
+          }
+        } else if (retryCount * RETRY_INTERVAL < MAX_RETRY_TIME) {
+          retryCount++;
+          timeoutId = setTimeout(checkMetalet, RETRY_INTERVAL);
+        } else {
+          console.warn('Metalet wallet not detected after timeout');
+        }
+      };
+
+      // Account status check interval
+      function startAccountCheckInterval() {
+        if (accountInterval) {
+          clearInterval(accountInterval);
+        }
+
+        accountInterval = setInterval(async () => {
+          try {
+            // Check WebView bridge
+            if (window.IDFramework) {
+              await window.IDFramework.dispatch('checkWebViewBridge').catch(err => {
+                console.warn('Failed to check WebView bridge:', err);
+              });
+            }
+
+            const walletStore = Alpine.store('wallet');
+            const appStore = Alpine.store('app');
+
+            // Auto connect in WebView if not authorized
+            if (!walletStore || !walletStore.isConnected) {
+              if (appStore && appStore.isWebView) {
+                await connectMetalet();
+              }
+            }
+
+            // Skip account check in WebView
+            if (appStore && appStore.isWebView) return;
+
+            // Check account status
+            if (window.metaidwallet && walletStore && walletStore.isConnected) {
+              try {
+                const res = await window.metaidwallet.getAddress();
+                const currentAddress = walletStore.address;
+
+                if ((res && typeof res === 'object' && res.status === 'not-connected') || 
+                    (typeof res === 'string' && currentAddress && res !== currentAddress)) {
+                  await disconnectMetalet();
+                  showWarning('Metalet 账户已变更');
+                }
+              } catch (error) {
+                console.error('Error checking account status:', error);
+              }
+            }
+          } catch (error) {
+            console.error('Error in account check interval:', error);
+          }
+        }, 2 * 1000); // Check every 2 seconds
+      }
+
+      // Initialize on DOM ready
+      window.addEventListener('DOMContentLoaded', async () => {
+        // Wait for Alpine and IDFramework to be ready
+        await new Promise((resolve) => {
+          let attempts = 0;
+          const maxAttempts = 100; // 5 seconds max wait
+          const checkReady = () => {
+            attempts++;
+            if (typeof Alpine !== 'undefined' && window.IDFramework && Alpine.store('app') && Alpine.store('wallet')) {
+              resolve();
+            } else if (attempts < maxAttempts) {
+              setTimeout(checkReady, 50);
+            } else {
+              console.warn('Alpine or IDFramework not ready after timeout, continuing anyway');
+              resolve();
+            }
+          };
+          checkReady();
+        });
+
+        // Initial WebView check
+        if (window.IDFramework) {
+          await window.IDFramework.dispatch('checkWebViewBridge').catch(err => {
+            console.warn('Failed to check WebView bridge:', err);
+          });
+        }
+
+        // Setup Metalet listeners
+        checkMetalet();
+
+        // Start account check interval
+        startAccountCheckInterval();
+
+        // Check BTC address if connected (wait a bit for connection to be established)
+        setTimeout(() => {
+          const walletStore = Alpine.store('wallet');
+          if (window.metaidwallet && walletStore && walletStore.isConnected) {
+            if (window.IDFramework) {
+              window.IDFramework.dispatch('checkBtcAddressSameAsMvc').then().catch((error) => {
+                showWarning('Metalet BTC当前地址与MVC地址不一致，请切换BTC地址与MVC地址一致后再进行使用');
+                setTimeout(() => {
+                  disconnectMetalet();
+                }, 3000);
+              });
+            }
+          }
+        }, 1000); // Wait 1 second for connection to be fully established
+      });
+
+      // Cleanup on page unload
+      window.addEventListener('beforeunload', () => {
+        if (accountInterval) {
+          clearInterval(accountInterval);
+        }
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+
+        // Remove event listeners
+        try {
+          if (window.metaidwallet && window.metaidwallet.removeListener) {
+            window.metaidwallet.removeListener('accountsChanged', metaletAccountsChangedHandler);
+            window.metaidwallet.removeListener('networkChanged', metaletNetworkChangedHandler);
+            window.metaidwallet.removeListener('LoginSuccess', appLoginSuccessHandler);
+            window.metaidwallet.removeListener('Logout', appLogoutHandler);
+            window.metaidwallet.removeListener('onAccountSwitch', appAccountSwitchHandler);
+          }
+        } catch (error) {
+          console.error('Error removing event listeners:', error);
+        }
+      });
+    })();
+  </script>
+
+</body>
+</html>

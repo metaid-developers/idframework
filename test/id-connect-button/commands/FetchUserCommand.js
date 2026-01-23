@@ -41,8 +41,8 @@ export default class FetchUserCommand {
       return;
     }
 
-    // Check if user already exists in store
-    if (userStore.users[metaid]) {
+    // Check if user already exists in store with the same metaid
+    if (userStore.user && userStore.user.metaid === metaid) {
       return;
     }
 
@@ -60,9 +60,10 @@ export default class FetchUserCommand {
       });
 
       // Update Model: Store user data keyed by metaid
-      userStore.users[metaid] = userData;
+      userStore.user = userData;
       userStore.isLoading = false;
       userStore.error = null;
+    
     } catch (error) {
       console.error('FetchUserCommand error:', error);
       userStore.error = error.message || 'Failed to fetch user information';

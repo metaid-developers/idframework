@@ -65,7 +65,12 @@ export default class FetchBuzzCommand {
         
         for (const metaid of uniqueMetaIds) {
           // Only fetch if not already in store
-          if (!stores.user.users[metaid]) {
+          // Support both stores.user.users[metaid] and stores.user.user structure
+          const users = stores.user.users || {};
+          const currentUser = stores.user.user || {};
+          const isUserLoaded = users[metaid] || (currentUser.metaid === metaid);
+          
+          if (!isUserLoaded) {
             // Dispatch fetchUser command asynchronously (don't await to avoid blocking)
             IDFramework.dispatch('fetchUser', { metaid }).catch(err => {
               console.warn(`Failed to fetch user info for ${metaid}:`, err);
