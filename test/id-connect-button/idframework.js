@@ -293,6 +293,7 @@ class IDFramework {
               globalMetaId: userInfo.globalMetaId || '',
               metaid: userInfo.metaid || metaid,
               name: userInfo.name || '',
+              nameId:userInfo.nameId ||'',
               address: userInfo.address || '',
               avatar: userInfo.avatar || '',
               avatarId: userInfo.avatarId || '',
@@ -551,6 +552,7 @@ class IDFramework {
      * await IDFramework.IDController.execute('fetchBuzz', { cursor: 0, size: 30 });
      */
     async execute(eventName, payload = {}, stores = null) {
+        
       // Check built-in commands first
       const builtInCommand = this.builtInCommands.get(eventName);
       if (builtInCommand) {
@@ -584,6 +586,12 @@ class IDFramework {
         return;
       }
 
+      // Validate commandPath is a valid string
+      if (typeof commandPath !== 'string' || !commandPath.trim()) {
+        console.error(`Invalid command path for event '${eventName}': ${commandPath}`);
+        return;
+      }
+      
       try {
         // Lazy load the command module
         const CommandModule = await import(commandPath);
@@ -601,9 +609,8 @@ class IDFramework {
           stores = {
             wallet: Alpine.store('wallet'),
             app: Alpine.store('app'),
-            buzz: Alpine.store('buzz'),
             user: Alpine.store('user'),
-            chat: Alpine.store('chat'),
+            
           };
         }
         
@@ -652,6 +659,7 @@ class IDFramework {
 
       try {
         const result = await window.metaidwallet.connect();
+        
         if (result && result.address) {
           // Update wallet store
           stores.wallet.isConnected = true;
@@ -661,12 +669,19 @@ class IDFramework {
           try {
             // stores.wallet.metaid = result.metaid || result.address;
             stores.wallet.publicKey = await window.metaidwallet.getPublicKey();
-            stores.wallet.network = await window.metaidwallet.getNetwork();
+             const network = await window.metaidwallet.getNetwork();
+             if(network){
+                     stores.wallet.network=network.network
+             }else{
+                stores.wallet.network='mainnet'
+             }
             
             // Get GlobalMetaID for cross-chain identity
             try {
               const globalMetaIdResult = await window.metaidwallet.getGlobalMetaid();
+              
               if (globalMetaIdResult && globalMetaIdResult.mvc) {
+                
                 stores.wallet.globalMetaId = globalMetaIdResult.mvc.globalMetaId;
                 stores.wallet.globalMetaIdInfo = globalMetaIdResult; // Store full info (mvc, btc, doge)
               }
@@ -690,58 +705,53 @@ class IDFramework {
     /**
      * CreatePINCommand - Create and broadcast a PIN to the blockchain
      * 
-     * This is a mock implementation. In production, this would:
-     * 1. Construct the PIN transaction
-     * 2. Sign the transaction using Metalet
-     * 3. Broadcast to the blockchain
+     * This method:
+     * 1. Constructs the PIN transaction
+     * 2. Signs the transaction using Metalet
+     * 3. Broadcasts to the blockchain
      * 
      * @param {Object} params - Command parameters
-     * @param {Object} params.payload - PIN data (content, path, etc.)
+     * @param {Object} params.payload - PIN data (operation, body, path, contentType)
      * @param {Object} params.stores - Alpine stores
      * @returns {Promise<Object>} Created PIN information
      */
-    async createPIN({ payload, stores }) {
-      // Mock implementation - in production, this would:
-      // 1. Construct PIN transaction
-      // 2. Sign with Metalet
-      // 3. Broadcast to blockchain
-      
-      const { content, path = '/protocols/simplebuzz', contentType = 'application/json;utf-8' } = payload;
+    async createPin({ payload, stores }) {
+      try {
+        // 1. Construct PIN transaction
+        // 2. Sign with Metalet
+        // 3. Broadcast to blockchain
+        
+        const { operation, body, path, contentType } = payload;
 
-      if (!content) {
-        throw new Error('PIN content is required');
+        if (!body) {
+          throw new Error('PIN body is required');
+        }
+
+       
+
+        const parmas = {
+          chain: 'mvc',
+          feeRate: 1,
+          dataList: [
+            {
+              metaidData: {
+                operation: operation,
+                path: path,
+                body: body,
+                contentType: contentType,
+              }
+            }
+          ]
+        };
+        
+        const createPinRes = await window.metaidwallet.createPin(parmas);
+        return createPinRes;
+      } catch (e) {
+        throw new Error(e);
       }
-
-      if (!stores.wallet.isConnected) {
-        throw new Error('Wallet must be connected to create PIN');
-      }
-
-      // Mock: Generate a fake txid
-      const mockTxid = IDFramework.BuiltInCommands.generateMockTxid();
-
-      // Mock: Return PIN information
-      return {
-        txid: mockTxid,
-        path: path,
-        content: content,
-        contentType: contentType,
-        author: stores.wallet.address,
-        timestamp: Math.floor(Date.now() / 1000),
-      };
     },
 
-    /**
-     * Generate a mock transaction ID (for development/testing)
-     * @returns {string} Mock 64-character hex string
-     */
-    generateMockTxid() {
-      const chars = '0123456789abcdef';
-      let txid = '';
-      for (let i = 0; i < 64; i++) {
-        txid += chars[Math.floor(Math.random() * chars.length)];
-      }
-      return txid;
-    },
+  
   };
 
   /**
@@ -769,7 +779,7 @@ class IDFramework {
 
     // Register built-in commands
     this.IDController.registerBuiltIn('connectWallet', this.BuiltInCommands.connectWallet);
-    this.IDController.registerBuiltIn('createPIN', this.BuiltInCommands.createPIN);
+    this.IDController.registerBuiltIn('createPIN', this.BuiltInCommands.createPin);
   }
 
   /**
@@ -847,7 +857,7 @@ class IDFramework {
     // Add all other registered stores (like 'buzz', 'user', etc.)
     // Alpine doesn't provide a direct way to list all stores,
     // so we try common store names and add any that exist
-    const commonStoreNames = ['buzz', 'user', 'settings'];
+    const commonStoreNames = [ 'user', 'settings'];
     commonStoreNames.forEach(name => {
       const store = Alpine.store(name);
       if (store) {
@@ -864,7 +874,7 @@ class IDFramework {
     if (storeName && Alpine.store(storeName)) {
       stores[storeName] = Alpine.store(storeName);
     }
-
+    
     await this.IDController.execute(eventName, payload, stores);
   }
 }
