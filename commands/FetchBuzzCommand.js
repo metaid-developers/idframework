@@ -1,172 +1,248 @@
 /**
- * FetchBuzzCommand - Business Logic for fetching Buzz feed
- * 
- * Command Pattern implementation following IDFramework architecture.
- * 
+ * FetchBuzzCommand - Business logic for fetching buzz list and user info
+ *
  * This command:
- * 1. Uses BusinessDelegate to fetch data from MetaID indexer API
- * 2. Transforms raw API response using DataAdapter (dataParser)
- * 3. Updates the Model (buzz store) with parsed data
- * 
- * @class FetchBuzzCommand
+ * 1. Fetches buzz list from MetaID MAN API by path (pagination)
+ * 2. Fetches user info by buzz address from MetaFS API
+ * 3. Caches user info in IndexedDB using metaId as primary key
  */
 export default class FetchBuzzCommand {
-  /**
-   * Execute the command
-   * 
-   * Command execution flow:
-   * 1. Set loading state in Model
-   * 2. Call BusinessDelegate to fetch data from service
-   * 3. Transform raw data using DataAdapter (dataParser)
-   * 4. Update Model with transformed data
-   * 
-   * @param {Object} params - Command parameters
-   * @param {Object} params.payload - Event payload
-   *   - cursor: {number} - Pagination cursor (default: 0)
-   *   - size: {number} - Number of items to fetch (default: 30)
-   *   - path: {string} - PIN path to fetch (default: '/protocols/simplebuzz')
-   * @param {Object} params.stores - Alpine stores object
-   *   - buzz: {Object} - Buzz store (list, isLoading, error)
-   * @param {Function} params.delegate - BusinessDelegate function for API calls
-   * @returns {Promise<void>}
-   */
   async execute({ payload = {}, stores, delegate }) {
-    // Resolve store (support both old and new API)
-    const store = stores.buzz || stores;
-    // Set loading state
-    store.isLoading = true;
-    store.error = null;
+    
+    if (!delegate) {
+      throw new Error('FetchBuzzCommand: delegate is required');
+    }
+
+    var cfg = (typeof window !== 'undefined' && window.IDConfig) ? window.IDConfig : {};
+    var path = payload.path || cfg.BUZZ_PATH || '/protocols/simplebuzz';
+    var rawCursor = payload.cursor;
+    var cursor = (rawCursor === undefined || rawCursor === null || rawCursor === '') ? 0 : rawCursor;
+    var size = Number(payload.size ?? cfg.BUZZ_PAGE_SIZE ?? 20);
+    
+    var query = new URLSearchParams({
+      cursor: String(cursor),
+      size: String(Number.isFinite(size) ? size : 20),
+      path: path,
+    }).toString();
+
+    var rawResponse = await delegate('metaid_man', '/pin/path/list?' + query, { method: 'GET' });
+    var normalized = this._normalizePinListResponse(rawResponse);
+
+    var enrichedList = await Promise.all(
+      normalized.list.map(async (pin) => {
+        var parsed = this._parsePin(pin);
+        var userInfo = await this._getUserInfoByAddress(parsed.address, delegate);
+        return {
+          id: parsed.id,
+          address: parsed.address,
+          timestamp: parsed.timestamp,
+          path: parsed.path,
+          metaid: parsed.metaid,
+          content: parsed.content,
+          attachments: parsed.attachments,
+          quotePin: parsed.quotePin,
+          lastId: parsed.lastId,
+          userInfo: userInfo,
+          raw: pin,
+        };
+      })
+    );
+
+    var result = {
+      list: enrichedList,
+      total: normalized.total,
+      nextCursor: normalized.nextCursor,
+    };
+
+    if (stores && stores.buzz) {
+      stores.buzz.total = result.total;
+      stores.buzz.nextCursor = result.nextCursor;
+      stores.buzz.lastUpdatedAt = Date.now();
+    }
+
+    return result;
+  }
+
+  _normalizePinListResponse(response) {
+    var payload = response;
+    if (response && typeof response === 'object' && typeof response.code === 'number') {
+      payload = response.data || {};
+    } else if (response && typeof response === 'object' && response.data && Array.isArray(response.data.list)) {
+      payload = response.data;
+    }
+
+    var list = Array.isArray(payload && payload.list) ? payload.list : [];
+    var total = Number((payload && payload.total) ?? list.length);
+    var nextCursor = null;
+    if (payload && payload.nextCursor !== undefined && payload.nextCursor !== null) {
+      nextCursor = payload.nextCursor;
+    } else if (response && response.nextCursor !== undefined && response.nextCursor !== null) {
+      nextCursor = response.nextCursor;
+    }
+
+    return {
+      list: list,
+      total: Number.isFinite(total) ? total : list.length,
+      nextCursor: nextCursor,
+    };
+  }
+
+  _parsePin(pin) {
+    var contentSummary = {};
+    if (pin && pin.contentSummary && typeof pin.contentSummary === 'object') {
+      contentSummary = pin.contentSummary;
+    } else if (pin && typeof pin.contentSummary === 'string') {
+      try {
+        contentSummary = JSON.parse(pin.contentSummary);
+      } catch (error) {
+        contentSummary = {};
+      }
+    }
+
+    var modifyHistory = Array.isArray(pin && pin.modify_history) ? pin.modify_history : [];
+    var fallbackTimestamp = Date.now();
+    var pinTimestamp = Number(pin && pin.timestamp);
+
+    return {
+      id: (pin && pin.id) || '',
+      address: (pin && pin.address) || '',
+      timestamp: Number.isFinite(pinTimestamp) ? pinTimestamp * 1000 : fallbackTimestamp,
+      path: (pin && pin.path) || '',
+      metaid: (pin && pin.metaid) || '',
+      content: contentSummary.content || '',
+      attachments: Array.isArray(contentSummary.attachments) ? contentSummary.attachments : [],
+      quotePin: contentSummary.quotePin || '',
+      lastId: modifyHistory.length ? modifyHistory[modifyHistory.length - 1] : ((pin && pin.id) || ''),
+    };
+  }
+
+  async _getUserInfoByAddress(address, delegate) {
+    if (!address) {
+      return this._emptyUserInfo('');
+    }
+
+    var cached = await this._getCachedUserByAddress(address);
+    if (cached) {
+      return cached;
+    }
 
     try {
-      // Extract parameters from payload or use defaults
-      const cursor = payload.cursor || 0;
-      const size = payload.size || 30;
-      const path = payload.path || '/protocols/simplebuzz';
-
-      // Build endpoint
-      const endpoint = `/pin/path/list?cursor=${cursor}&size=${size}&path=${path}`;
-
-      // Fetch data using BusinessDelegate
-      const rawData = await delegate('metaid_man', endpoint);
-
-      // Parse and transform data
-      const parsedData = this.dataParser(rawData);
-
-      // Update store - ensure Alpine reactivity
-      // Direct assignment should work with Alpine's reactive proxy
-      store.list = parsedData;
-      store.isLoading = false;
-      store.error = null;
-
-      // Fetch user information for each unique author in the list
-      // This ensures user avatars and names are available for display
-      if (parsedData.length > 0 && stores.user) {
-        const uniqueMetaIds = [...new Set(parsedData.map(item => item.author).filter(Boolean))];
-        
-        for (const metaid of uniqueMetaIds) {
-          // Only fetch if not already in store
-          // Support both stores.user.users[metaid] and stores.user.user structure
-          const users = stores.user.users || {};
-          const currentUser = stores.user.user || {};
-          const isUserLoaded = users[metaid] || (currentUser.metaid === metaid);
-          
-          if (!isUserLoaded) {
-            // Dispatch fetchUser command asynchronously (don't await to avoid blocking)
-            IDFramework.dispatch('fetchUser', { metaid }).catch(err => {
-              console.warn(`Failed to fetch user info for ${metaid}:`, err);
-            });
-          }
-        }
-      } else {
-        if (!stores.user) {
-          console.warn('FetchBuzzCommand: User store not available');
-        }
+      var endpoint = '/v1/users/address/' + encodeURIComponent(address);
+      var response = await delegate('metafs', endpoint, { method: 'GET' });
+      var normalized = this._normalizeUserResponse(response, address);
+      if (normalized.metaId) {
+        await this._saveUserToCache(normalized);
       }
+      return normalized;
     } catch (error) {
-      console.error('FetchBuzzCommand error:', error);
-      store.error = error.message || 'Failed to fetch buzz';
-      store.isLoading = false;
+      return this._emptyUserInfo(address);
     }
   }
 
-  /**
-   * DataAdapter (DataParser) - Transform raw API response to Model format
-   * 
-   * This method adapts the raw API response structure to match the application's
-   * Buzz model format. This separation allows the Command to work with
-   * different API response structures without changing business logic.
-   * 
-   * API Response Structure: 
-   * {
-   *   code: 1,
-   *   message: "ok",
-   *   data: {
-   *     list: [...],
-   *     nextCursor: "...",
-   *     total: number
-   *   }
-   * }
-   * 
-   * @param {Object} rawData - Raw API response from BusinessDelegate
-   * @returns {Array} Array of simplified buzz objects for Model
-   */
-  dataParser(rawData) {
-    // Extract list from response structure: rawData.data.list
-    let items = [];
-    
-    if (rawData && rawData.data && Array.isArray(rawData.data.list)) {
-      items = rawData.data.list;
-    } else if (Array.isArray(rawData)) {
-      items = rawData;
-    } else if (rawData && rawData.data && Array.isArray(rawData.data)) {
-      items = rawData.data;
-    } else {
-      console.warn('API response structure unexpected. Raw data:', rawData);
-      return [];
+  _normalizeUserResponse(response, address) {
+    var payload = response;
+    if (response && typeof response === 'object' && typeof response.code === 'number') {
+      payload = response.data || {};
+    } else if (response && typeof response === 'object' && response.data && typeof response.data === 'object') {
+      payload = response.data;
     }
 
-    const parsed = items.map(item => {
-      if (!item || typeof item !== 'object') {
-        return {
-          content: String(item || ''),
-          author: 'unknown',
-          txid: '',
-          _raw: item,
-        };
-      }
+    var metaId = (payload && (payload.metaId || payload.metaid || payload.globalMetaId)) || '';
+    var avatar = (payload && payload.avatar) || '';
+    var avatarUrl = this._resolveAvatarUrl(avatar, payload);
 
-      // Parse contentSummary JSON string to extract actual content
-      let content = '';
-      if (item.contentSummary) {
-        try {
-          const summaryObj = JSON.parse(item.contentSummary);
-          content = summaryObj.content || '';
-        } catch (e) {
-          console.warn('Failed to parse contentSummary:', item.contentSummary, e);
-          // If parsing fails, use contentSummary as-is or fallback to other fields
-          content = item.contentSummary || item.content || '';
+    return {
+      metaId: metaId,
+      name: (payload && payload.name) || '',
+      avatar: avatarUrl,
+      address: (payload && payload.address) || address || '',
+    };
+  }
+
+  _resolveAvatarUrl(avatar, payload) {
+    if (!avatar) return '';
+    if (typeof avatar === 'string' && (avatar.indexOf('http://') === 0 || avatar.indexOf('https://') === 0)) {
+      return avatar;
+    }
+
+    var serviceLocator = (typeof window !== 'undefined' && window.ServiceLocator) ? window.ServiceLocator : {};
+    var metafsBase = serviceLocator.metafs || '';
+    var avatarId = payload && (payload.avatarPinId || payload.avatarId);
+    if (avatarId && metafsBase) {
+      return metafsBase + '/v1/users/avatar/accelerate/' + avatarId;
+    }
+    return avatar;
+  }
+
+  _emptyUserInfo(address) {
+    return {
+      metaId: '',
+      name: '',
+      avatar: '',
+      address: address || '',
+    };
+  }
+
+  async _initUserDB() {
+    return new Promise(function (resolve, reject) {
+      var request = indexedDB.open('idframework-buzz-user-db', 1);
+
+      request.onerror = function () {
+        reject(new Error('Failed to open buzz user IndexedDB'));
+      };
+
+      request.onsuccess = function () {
+        resolve(request.result);
+      };
+
+      request.onupgradeneeded = function (event) {
+        var db = event.target.result;
+        if (!db.objectStoreNames.contains('BuzzUser')) {
+          var store = db.createObjectStore('BuzzUser', { keyPath: 'metaId' });
+          store.createIndex('address', 'address', { unique: false });
         }
-      } else {
-        // Fallback to direct content fields
-        content = item.content || item.summary || item.text || item.body || item.message || '';
-      }
-
-      // Extract author from metaid field
-      const author = item.metaid || item.pop || item.author || item.creator || item.user || 'unknown';
-
-      // Extract txid from genesisTransaction field
-      const txid = item.genesisTransaction || item.id || item.txid || item.transactionId || item.hash || '';
-
-      return {
-        content,
-        author,
-        txid,
-        // Preserve original item for potential future use
-        _raw: item,
       };
     });
-    
-    return parsed;
+  }
+
+  async _getCachedUserByAddress(address) {
+    if (!address) return null;
+    try {
+      var db = await this._initUserDB();
+      return await new Promise(function (resolve, reject) {
+        var tx = db.transaction(['BuzzUser'], 'readonly');
+        var store = tx.objectStore('BuzzUser');
+        var index = store.index('address');
+        var request = index.get(address);
+        request.onsuccess = function () {
+          resolve(request.result || null);
+        };
+        request.onerror = function () {
+          reject(new Error('Failed to read cached user by address'));
+        };
+      });
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async _saveUserToCache(user) {
+    if (!user || !user.metaId) return;
+    try {
+      var db = await this._initUserDB();
+      await new Promise(function (resolve, reject) {
+        var tx = db.transaction(['BuzzUser'], 'readwrite');
+        var store = tx.objectStore('BuzzUser');
+        var request = store.put(user);
+        request.onsuccess = function () {
+          resolve();
+        };
+        request.onerror = function () {
+          reject(new Error('Failed to save cached user'));
+        };
+      });
+    } catch (error) {
+      // Ignore cache errors to avoid breaking main flow.
+    }
   }
 }
-

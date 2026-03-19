@@ -11,8 +11,9 @@
 // ============================================
 // ServiceLocator - Service Endpoint Configuration
 // ============================================
-// Define base URLs for various services used by BusinessDelegate
-// Services are accessed via serviceKey in BusinessDelegate calls
+// Define base URLs for various services used by BusinessDelegate.
+// idconfig.js may have already set ServiceLocator defaults; here we override or extend.
+// For MetaID user registration, set window.__createOrUpdateUserInfoImpl to your implementation.
 window.ServiceLocator = {
   metaid_man: 'https://manapi.metaid.io', // MetaID data indexer API
   metafs: 'https://file.metaid.io/metafile-indexer/api', // MetaFS service for user info and avatars
@@ -28,12 +29,6 @@ window.ServiceLocator = {
 // These models extend the framework's built-in models (wallet, app)
 // All models are managed through Alpine.js stores for reactive updates
 
-// BuzzModel - Application-specific model for Buzz feed data
-const BuzzModel = {
-  list: [],
-  isLoading: false,
-  error: null,
-};
 
 // UserModel - Application-specific model for user data
 // Stores user information keyed by metaid
@@ -58,7 +53,6 @@ window.addEventListener('alpine:init', () => {
       // If stores already exist, initModels will update them
       IDFramework.init({
         // Register application-specific models
-        buzz: BuzzModel,
         user: UserModel,
         // Add more custom models as needed:
         // settings: SettingsModel,
@@ -115,7 +109,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   // This is safe to call multiple times - initModels won't overwrite existing stores
   // and registerBuiltIn will just update the command if it already exists
   IDFramework.init({
-    buzz: BuzzModel,
     user: UserModel,
   });
 
@@ -137,10 +130,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Register Application Commands
   // ============================================
   // Register file-based commands for this application
-  IDFramework.IDController.register('fetchBuzz', './commands/FetchBuzzCommand.js');
-  IDFramework.IDController.register('postBuzz', './commands/PostBuzzCommand.js');
+
   // IDFramework.IDController.register('ROUTE_CHANGE', './commands/NavigateCommand.js'); // Disabled - routing disabled
   IDFramework.IDController.register('fetchUser', './commands/FetchUserCommand.js');
+  IDFramework.IDController.register('fetchUserInfo', './commands/FetchUserInfoCommand.js');
+  IDFramework.IDController.register('fetchBuzz', './commands/FetchBuzzCommand.js');
+  IDFramework.IDController.register('postBuzz', './commands/PostBuzzCommand.js');
+  IDFramework.IDController.register('sendChatMessage', './commands/SendChatMessageCommand.js');
+  IDFramework.IDController.register('getPinDetail', './commands/GetPinDetailCommand.js');
+  IDFramework.IDController.register('checkWebViewBridge', './commands/CheckWebViewBridgeCommand.js');
+  IDFramework.IDController.register('checkBtcAddressSameAsMvc', './commands/CheckBtcAddressSameAsMvcCommand.js');
   
   // Built-in commands are already registered by IDFramework.init()
   // You can also register additional built-in commands here if needed:
@@ -155,26 +154,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   // - Checking wallet connection status
   // - Restoring user session
   
-  // Step 1: Load the buzz card component dynamically (lazy loading)
-  // This reduces initial bundle size while still auto-loading on startup
-  try {
-    await IDFramework.loadComponent('./idcomponents/id-buzz-card.js');
-    console.log('Buzz card component loaded successfully');
-  } catch (error) {
-    console.error('Failed to load buzz card component:', error);
-    // Continue anyway - the component might be loaded later
-  }
-  
-  // Step 1.5: Load the user info float panel component
-  try {
-    await IDFramework.loadComponent('./idcomponents/id-userinfo-float-panel.js');
-    console.log('User info float panel component loaded successfully');
-  } catch (error) {
-    console.error('Failed to load user info float panel component:', error);
-    // Continue anyway - the component might be loaded later
-  }
-  
-  // Step 2: Auto-fetch buzz feed on application load
-  await IDFramework.dispatch('fetchBuzz');
 });
 
