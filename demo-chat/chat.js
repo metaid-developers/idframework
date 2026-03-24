@@ -31,7 +31,7 @@ const CHAT_COMPONENTS = [
 const DEFERRED_CHAT_COMPONENTS = [
   '@idf/components/id-chat-group-info-panel.js?v=20260322-m4i',
 ];
-const CHAT_COMMAND_VERSION = '20260324-previewfix1';
+const CHAT_COMMAND_VERSION = '20260324-previewformat1';
 const GROUP_TEXT_PROTOCOL = '/protocols/simplegroupchat';
 const PRIVATE_TEXT_PROTOCOL = '/protocols/simplemsg';
 const GROUP_FILE_PROTOCOL = '/protocols/simplefilegroupchat';

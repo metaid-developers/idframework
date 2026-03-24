@@ -32,7 +32,7 @@ test('FetchChatListCommand keeps plain-text content as lastMessage preview', () 
   assert.equal(conversations.group_1.type, '1');
 });
 
-test('FetchChatListCommand keeps preview in a single line without speculative sender prefix', () => {
+test('FetchChatListCommand prefixes group preview with sender label in a single line', () => {
   const command = new FetchChatListCommand();
 
   const conversations = command._parseChatList({
@@ -52,7 +52,7 @@ test('FetchChatListCommand keeps preview in a single line without speculative se
   });
 
   assert.ok(conversations.group_sender_preview);
-  assert.equal(conversations.group_sender_preview.lastMessage, 'line one line two');
+  assert.equal(conversations.group_sender_preview.lastMessage, 'Alice: line one line two');
 });
 
 test('FetchChatListCommand maps private chat by metaId and preserves user name', () => {
@@ -105,6 +105,32 @@ test('FetchChatListCommand maps private chat by userInfo.globalMetaId when metaI
   assert.ok(conversations.peer_global_metaid);
   assert.equal(conversations.peer_global_metaid.name, 'Bob');
   assert.equal(conversations.peer_global_metaid.type, '2');
+});
+
+test('FetchChatListCommand strips sender label prefix from private preview text', () => {
+  const command = new FetchChatListCommand();
+
+  const conversations = command._parseChatList({
+    data: {
+      list: [
+        {
+          type: 2,
+          metaId: 'peer_prefixed_private',
+          userInfo: {
+            name: 'Alice',
+            avatarImage: 'https://example.com/a.png',
+          },
+          senderName: 'Alice',
+          content: 'Alice: hello there',
+          timestamp: 1711000000000,
+          index: 15,
+        },
+      ],
+    },
+  });
+
+  assert.ok(conversations.peer_prefixed_private);
+  assert.equal(conversations.peer_prefixed_private.lastMessage, 'hello there');
 });
 
 test('FetchChatListCommand does not expose encrypted placeholder before runtime decryption', () => {
@@ -235,6 +261,52 @@ test('FetchChatListCommand resolves preview sender by sender identity instead of
   );
 
   assert.equal(sender, 'SenderName');
+});
+
+test('FetchChatListCommand runtime preview prefixes group content with sender label', async () => {
+  const command = new FetchChatListCommand();
+
+  const preview = await command._resolveRuntimePreviewForConversation(
+    {
+      type: '1',
+      groupId: 'group_runtime_sender',
+      _raw: {
+        content: 'hello runtime',
+        createGlobalMetaId: 'idq_sender_runtime',
+        createUserInfo: {
+          globalMetaId: 'idq_sender_runtime',
+          name: 'Alice',
+        },
+      },
+    },
+    { globalMetaId: 'idq_viewer_runtime' },
+    { users: {} }
+  );
+
+  assert.equal(preview, 'Alice: hello runtime');
+});
+
+test('FetchChatListCommand runtime preview strips sender label from private content', async () => {
+  const command = new FetchChatListCommand();
+
+  const preview = await command._resolveRuntimePreviewForConversation(
+    {
+      type: '2',
+      metaid: 'peer_runtime_sender',
+      _raw: {
+        content: 'Alice: hello runtime',
+        createGlobalMetaId: 'peer_runtime_sender',
+        userInfo: {
+          globalMetaId: 'peer_runtime_sender',
+          name: 'Alice',
+        },
+      },
+    },
+    { globalMetaId: 'self_runtime_viewer' },
+    { users: {} }
+  );
+
+  assert.equal(preview, 'hello runtime');
 });
 
 test('FetchChatListCommand maps private avatar to avatar accelerate endpoint', () => {

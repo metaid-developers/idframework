@@ -90,6 +90,29 @@ export default class FetchChatListCommand {
     return `${senderLabel}: ${message}`;
   }
 
+  _escapeRegExp(text) {
+    return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  _stripSenderPrefix(sender, previewText) {
+    const message = this._toSingleLine(previewText);
+    if (!message) return '';
+    const senderLabel = this._formatSenderLabel(sender);
+    if (!senderLabel) return message;
+    const pattern = new RegExp(`^${this._escapeRegExp(senderLabel)}\\s*[:：]\\s*`);
+    const stripped = message.replace(pattern, '').trim();
+    return stripped || message;
+  }
+
+  _formatConversationPreview(chatType, previewText, sender) {
+    if (previewText == null) return previewText;
+    const message = this._toSingleLine(previewText);
+    if (!message) return message;
+    return String(chatType || '') === '1'
+      ? (this._prefixWithSender(sender, message) || message)
+      : this._stripSenderPrefix(sender, message);
+  }
+
   _extractPreviewSender(chat) {
     if (!chat || typeof chat !== 'object') return '';
     const lastMessage = chat.lastMessage && typeof chat.lastMessage === 'object' ? chat.lastMessage : {};
@@ -387,20 +410,24 @@ export default class FetchChatListCommand {
   async _resolveRuntimePreviewForConversation(conversation, walletStore, userStore) {
     if (!conversation || typeof conversation !== 'object') return '';
     const row = conversation._raw && typeof conversation._raw === 'object' ? conversation._raw : {};
+    const conversationType = String(conversation.type || '');
     const payload = this._extractRuntimePayload(row);
+    const previewSender = (conversationType === '1' || conversationType === '2')
+      ? (this._resolveSenderLabel(row, conversation, walletStore, userStore) || this._extractPreviewSender(row))
+      : '';
     if (payload.fileLike) {
-      return '[File]';
+      return this._formatConversationPreview(conversationType, '[File]', previewSender);
     }
 
     let preview = this._toSingleLine(payload.content);
     if (!preview) return '';
 
-    if (String(conversation.type || '') === '1') {
+    if (conversationType === '1') {
       if (this._isHashLikeContent(preview)) {
         const groupId = this._toText(conversation.groupId || row.groupId || conversation.metaid);
         preview = await this._decryptGroupText(preview, groupId);
       }
-    } else if (String(conversation.type || '') === '2') {
+    } else if (conversationType === '2') {
       if (this._isHashLikeContent(preview)) {
         const peerGlobalMetaId = this._toText(
           row.globalMetaId ||
@@ -416,7 +443,7 @@ export default class FetchChatListCommand {
     preview = this._toSingleLine(preview);
     if (!preview) return '';
     if (this._isHashLikeContent(preview)) return '';
-    return preview;
+    return this._formatConversationPreview(conversationType, preview, previewSender);
   }
 
   _sortedPreviewKeys(conversations, limit = 120) {
@@ -984,7 +1011,11 @@ export default class FetchChatListCommand {
         conversationName = chat.name || chat.title || null;
       }
       
-      const lastMessage = this._extractMessagePreview(chat);
+      const lastMessage = this._formatConversationPreview(
+        chatType,
+        this._extractMessagePreview(chat),
+        this._extractPreviewSender(chat)
+      );
       
       // Last message time - use timestamp field
       let lastMessageTime = null;
