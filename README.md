@@ -138,7 +138,7 @@ IDFramework.init({
 
 #### 2. Controller 层（控制层）
 
-**位置**：`idframework.js` - `IDFramework.IDController`
+**位置**：`idframework/idframework.js` - `IDFramework.IDController`
 
 **职责**：
 - 映射事件到 Command
@@ -151,7 +151,7 @@ IDFramework.init({
 
 #### 3. Command 层（业务逻辑层）
 
-**位置**：`/commands/` 目录
+**位置**：`/idframework/commands/` 目录
 
 **职责**：
 - 执行具体的业务逻辑
@@ -177,7 +177,7 @@ export default class MyCommand {
 
 #### 4. Delegate 层（服务代理层）
 
-**位置**：`idframework.js` - `IDFramework.Delegate`
+**位置**：`idframework/idframework.js` - `IDFramework.Delegate`
 
 **职责**：
 - 抽象远程服务通信的复杂性
@@ -187,7 +187,7 @@ export default class MyCommand {
 
 #### 5. View 层（视图层）
 
-**位置**：`/idcomponents/` 目录
+**位置**：`/idframework/components/` 目录
 
 **职责**：
 - 展示数据（从 Model 绑定）
@@ -211,15 +211,20 @@ your-metaid-app/
 ├── index.html          # 应用入口页面
 ├── app.js              # 应用配置和初始化
 ├── app.css             # 全局样式和主题变量
-├── idframework.js      # 框架核心（必须）
-├── idcomponents/       # 视图组件目录
-│   ├── id-buzz-card.js
-│   ├── id-connect-button.js
-│   └── ...
-└── commands/           # 业务命令目录
-    ├── FetchBuzzCommand.js
-    ├── PostBuzzCommand.js
-    └── ...
+└── idframework/         # 框架目录（可整体复用）
+    ├── idframework.js   # 框架核心（必须）
+    ├── components/      # 视图组件目录
+    │   ├── id-buzz-card.js
+    │   ├── id-buzz-tabs.js
+    │   ├── id-connect-button.js
+    │   └── ...
+    ├── commands/        # 业务命令目录
+    │   ├── FetchBuzzCommand.js
+    │   ├── PostBuzzCommand.js
+    │   └── ...
+    ├── stores/          # 可复用 store（按需）
+    ├── utils/           # 通用工具（按需）
+    └── vendors/         # 三方依赖（按需）
 ```
 
 ### 2. 基础设置
@@ -241,6 +246,15 @@ your-metaid-app/
     window.__unocss = { theme: {}, shortcuts: {}, rules: [] };
   </script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@unocss/runtime"></script>
+
+  <!-- 推荐：使用 importmap 为框架做别名 -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@idf/": "./idframework/"
+      }
+    }
+  </script>
   
   <!-- 应用样式 -->
   <link rel="stylesheet" href="app.css">
@@ -253,7 +267,7 @@ your-metaid-app/
   </div>
 
   <!-- 框架核心 -->
-  <script type="module" src="idframework.js"></script>
+  <script type="module" src="./idframework/idframework.js"></script>
   
   <!-- 应用配置 -->
   <script type="module" src="app.js"></script>
@@ -284,7 +298,7 @@ window.addEventListener('alpine:init', () => {
 
 // 注册命令
 window.addEventListener('DOMContentLoaded', async () => {
-  IDFramework.IDController.register('fetchData', './commands/FetchDataCommand.js');
+  IDFramework.IDController.register('fetchData', '@idf/commands/FetchDataCommand.js');
   
   // 启动任务
   await IDFramework.dispatch('fetchData');
@@ -311,10 +325,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 ### 3. 创建组件
 
-在 `/idcomponents/` 目录下创建组件文件：
+在 `/idframework/components/` 目录下创建组件文件：
 
 ```javascript
-// idcomponents/id-my-component.js
+// idframework/components/id-my-component.js
 class IdMyComponent extends HTMLElement {
   constructor() {
     super();
@@ -360,10 +374,10 @@ customElements.define('id-my-component', IdMyComponent);
 
 ### 4. 创建命令
 
-在 `/commands/` 目录下创建命令文件：
+在 `/idframework/commands/` 目录下创建命令文件：
 
 ```javascript
-// commands/FetchDataCommand.js
+// idframework/commands/FetchDataCommand.js
 export default class FetchDataCommand {
   async execute({ payload = {}, stores, delegate }) {
     const store = stores.myModel;
@@ -450,7 +464,7 @@ window.location.hash = '#/home';
 所有路由变化都由路由 Command（如 `MapsCommand` 或 `RouteCommand`）处理：
 
 ```javascript
-// commands/MapsCommand.js
+// idframework/commands/MapsCommand.js
 export default class MapsCommand {
   async execute({ payload, stores, delegate }) {
     const route = payload.route || '/home';
@@ -463,7 +477,7 @@ export default class MapsCommand {
     const componentName = routeMap[route];
     if (componentName) {
       // 动态加载组件
-      await IDFramework.loadComponent(`./idcomponents/${componentName}.js`);
+      await IDFramework.loadComponent(`@idf/components/${componentName}.js`);
       
       // 更新当前视图
       stores.app.currentView = componentName.replace('id-', '').replace('-page', '');
@@ -494,7 +508,7 @@ export default class MapsCommand {
 
 **步骤 1：创建页面组件**
 
-在 `./idcomponents/` 目录下创建组件文件，例如 `id-new-page.js`：
+在 `./idframework/components/` 目录下创建组件文件，例如 `id-new-page.js`：
 
 ```javascript
 class IdNewPage extends HTMLElement {
@@ -534,20 +548,20 @@ const routeMap = {
 };
 
 // 注册路由命令
-IDFramework.IDController.register('routeChange', './commands/MapsCommand.js');
+IDFramework.IDController.register('routeChange', '@idf/commands/MapsCommand.js');
 ```
 
 **步骤 3：在路由命令中添加组件加载逻辑**
 
 ```javascript
-// commands/MapsCommand.js
+// idframework/commands/MapsCommand.js
 async execute({ payload, stores, delegate }) {
   const route = payload.route;
   const componentName = routeMap[route];
   
   if (componentName) {
     // 动态加载组件
-    await IDFramework.loadComponent(`./idcomponents/${componentName}.js`);
+    await IDFramework.loadComponent(`@idf/components/${componentName}.js`);
     
     // 更新视图状态
     stores.app.currentView = componentName.replace('id-', '').replace('-page', '');
@@ -644,7 +658,7 @@ const avatarData = await IDFramework.Delegate.UserDelegate('metaid_man', '/user/
 **示例**：
 ```javascript
 // 注册文件 Command
-IDFramework.IDController.register('fetchBuzz', './commands/FetchBuzzCommand.js');
+IDFramework.IDController.register('fetchBuzz', '@idf/commands/FetchBuzzCommand.js');
 
 // 注册内置 Command
 IDFramework.IDController.registerBuiltIn('customCommand', myFunction);
@@ -718,180 +732,6 @@ const pinResult = await IDFramework.BuiltInCommands.createPIN({
     app: Alpine.store('app'),
   },
 });
-```
-
----
-
-## 路由系统（Routing System）
-
-### Hash-based 路由策略
-
-IDFramework 使用 **Hash-based Routing**（基于哈希的路由）来实现单页应用（SPA）的页面导航。
-
-#### 为什么使用 Hash Routing？
-
-1. **部署无关性**：Hash routing 不需要服务器配置，可以在任何静态文件服务器上运行
-2. **子目录支持**：应用可以部署在 `https://example.com/my-app/#/home` 这样的子目录中
-3. **简单可靠**：不依赖 HTML5 History API，兼容性更好
-
-#### 路由格式
-
-- **基础路由**：`#/home`、`#/profile`、`#/buzz`
-- **参数路由**：`#/profile/:id`、`#/buzz/:txid`
-- **查询参数**：`#/search?q=keyword`
-
-#### 路由状态管理
-
-路由状态存储在 `Alpine.store('app')` 中：
-
-```javascript
-{
-  currentView: 'home',        // 当前视图名称
-  routeParams: { id: '123' }, // 路由参数
-  routeHistory: []            // 路由历史（可选）
-}
-```
-
-#### 导航方式
-
-**1. 程序化导航（推荐）**
-
-```javascript
-// 使用框架的路由器
-await IDFramework.router.push('/home');
-await IDFramework.router.push('/profile/123');
-```
-
-**2. 直接修改 Hash**
-
-```javascript
-// 直接设置 hash，会触发 ROUTE_CHANGE 事件
-window.location.hash = '#/home';
-```
-
-#### 路由命令处理
-
-所有路由变化都由路由 Command（如 `MapsCommand` 或 `RouteCommand`）处理：
-
-```javascript
-// commands/MapsCommand.js
-export default class MapsCommand {
-  async execute({ payload, stores, delegate }) {
-    const route = payload.route || '/home';
-    const routeMap = {
-      '/home': 'id-home-page',
-      '/profile': 'id-profile-page',
-      '/buzz': 'id-buzz-feed',
-    };
-    
-    const componentName = routeMap[route];
-    if (componentName) {
-      // 动态加载组件
-      await IDFramework.loadComponent(`./idcomponents/${componentName}.js`);
-      
-      // 更新当前视图
-      stores.app.currentView = componentName.replace('id-', '').replace('-page', '');
-    }
-  }
-}
-```
-
-#### 视图切换模式
-
-在 `index.html` 中使用 Alpine.js 的 `x-if` 指令根据 `currentView` 切换视图：
-
-```html
-<template x-if="$store.app.currentView === 'home'">
-  <id-home-page></id-home-page>
-</template>
-
-<template x-if="$store.app.currentView === 'profile'">
-  <id-profile-page></id-profile-page>
-</template>
-
-<template x-if="$store.app.currentView === 'buzz-feed'">
-  <id-buzz-feed></id-buzz-feed>
-</template>
-```
-
-#### 创建新页面步骤
-
-**步骤 1：创建页面组件**
-
-在 `./idcomponents/` 目录下创建组件文件，例如 `id-new-page.js`：
-
-```javascript
-class IdNewPage extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-  }
-
-  connectedCallback() {
-    this.render();
-  }
-
-  render() {
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host { display: block; }
-        .page { padding: 1rem; }
-      </style>
-      <div class="page">
-        <h1>New Page</h1>
-        <p>This is a new page component.</p>
-      </div>
-    `;
-  }
-}
-
-customElements.define('id-new-page', IdNewPage);
-```
-
-**步骤 2：在 app.js 中注册路由**
-
-```javascript
-// app.js
-const routeMap = {
-  '/home': 'id-home-page',
-  '/new-page': 'id-new-page',  // 新增路由
-};
-
-// 注册路由命令
-IDFramework.IDController.register('routeChange', './commands/MapsCommand.js');
-```
-
-**步骤 3：在路由命令中添加组件加载逻辑**
-
-```javascript
-// commands/MapsCommand.js
-async execute({ payload, stores, delegate }) {
-  const route = payload.route;
-  const componentName = routeMap[route];
-  
-  if (componentName) {
-    // 动态加载组件
-    await IDFramework.loadComponent(`./idcomponents/${componentName}.js`);
-    
-    // 更新视图状态
-    stores.app.currentView = componentName.replace('id-', '').replace('-page', '');
-  }
-}
-```
-
-**步骤 4：在 index.html 中添加模板**
-
-```html
-<template x-if="$store.app.currentView === 'new-page'">
-  <id-new-page></id-new-page>
-</template>
-```
-
-**步骤 5：导航到新页面**
-
-```javascript
-// 在组件或命令中
-await IDFramework.router.push('/new-page');
 ```
 
 ---
@@ -1094,18 +934,21 @@ metaid-app/
 ├── index.html              # 应用入口页面
 ├── app.js                  # 应用配置、ServiceLocator、Model 定义、命令注册
 ├── app.css                 # 全局样式、CSS Variables 主题系统
-├── idframework.js          # 框架核心（必须）
-│
-├── idcomponents/           # 视图组件目录
-│   ├── id-buzz-card.js
-│   ├── id-connect-button.js
-│   ├── id-post-buzz-panel.js
-│   └── ...                 # 更多组件
-│
-└── commands/               # 业务命令目录
-    ├── FetchBuzzCommand.js
-    ├── PostBuzzCommand.js
-    └── ...                 # 更多命令
+└── idframework/
+    ├── idframework.js      # 框架核心（必须）
+    ├── components/         # 视图组件目录
+    │   ├── id-buzz-card.js
+    │   ├── id-buzz-tabs.js
+    │   ├── id-connect-button.js
+    │   ├── id-post-buzz-panel.js
+    │   └── ...             # 更多组件
+    ├── commands/           # 业务命令目录
+    │   ├── FetchBuzzCommand.js
+    │   ├── PostBuzzCommand.js
+    │   └── ...             # 更多命令
+    ├── stores/
+    ├── utils/
+    └── vendors/
 ```
 
 ### 文件职责说明
@@ -1115,9 +958,9 @@ metaid-app/
 | `index.html` | 应用入口，引入依赖，定义页面结构 |
 | `app.js` | 应用配置、ServiceLocator、Model 定义、命令注册、启动逻辑 |
 | `app.css` | 全局样式、CSS Variables 主题系统、深色模式支持 |
-| `idframework.js` | 框架核心：Model 层、Controller 层、BusinessDelegate 层、内置 Commands |
-| `idcomponents/*.js` | 视图组件：展示数据、派发事件 |
-| `commands/*.js` | 业务命令：业务逻辑、数据转换、Model 更新 |
+| `idframework/idframework.js` | 框架核心：Model 层、Controller 层、BusinessDelegate 层、内置 Commands |
+| `idframework/components/*.js` | 视图组件：展示数据、派发事件 |
+| `idframework/commands/*.js` | 业务命令：业务逻辑、数据转换、Model 更新 |
 
 ---
 
@@ -1173,14 +1016,14 @@ const UserModel = {
 ### 1. 创建新功能
 
 1. **定义 Model**（如需要）：在 `app.js` 中添加新的 Model
-2. **创建 Command**：在 `/commands/` 中创建业务逻辑
+2. **创建 Command**：在 `/idframework/commands/` 中创建业务逻辑
 3. **注册 Command**：在 `app.js` 中注册命令
-4. **创建组件**：在 `/idcomponents/` 中创建视图组件
+4. **创建组件**：在 `/idframework/components/` 中创建视图组件
 5. **在页面中使用**：在 `index.html` 中使用组件
 
 ### 2. 创建新页面（带路由）
 
-1. **创建页面组件**：在 `/idcomponents/` 中创建页面组件（如 `id-new-page.js`）
+1. **创建页面组件**：在 `/idframework/components/` 中创建页面组件（如 `id-new-page.js`）
 2. **注册路由**：在 `app.js` 的 `routeMap` 中添加路由映射（如 `'/new-page': 'id-new-page'`）
 3. **更新路由命令**：在路由 Command（如 `MapsCommand`）中添加组件加载逻辑，使用 `IDFramework.loadComponent()` 动态加载组件
 4. **添加模板**：在 `index.html` 中添加 `<template x-if="$store.app.currentView === 'new-page'"><id-new-page></id-new-page></template>`
@@ -1214,13 +1057,13 @@ const UserModel = {
 
 3. **Controller 路由**：
    ```javascript
-   // idframework.js - IDController
+   // idframework/idframework.js - IDController
    IDController.execute('postBuzz', { content: 'Hello' });
    ```
 
 4. **Command 执行**：
    ```javascript
-   // commands/PostBuzzCommand.js
+   // idframework/commands/PostBuzzCommand.js
    async execute({ payload, stores, delegate }) {
      // 使用内置 createPIN
      const pin = await IDFramework.BuiltInCommands.createPIN({...});
@@ -1267,7 +1110,7 @@ A: 在 Alpine.js 模板中使用 `$store.modelName`：
 
 ### Q: 如何创建自定义 Command？
 
-A: 在 `/commands/` 目录创建文件，实现 `execute` 方法，然后在 `app.js` 中注册。
+A: 在 `/idframework/commands/` 目录创建文件，实现 `execute` 方法，然后在 `app.js` 中注册。
 
 ### Q: 组件如何与框架通信？
 
@@ -1301,4 +1144,3 @@ MIT License
 ---
 
 **IDFramework** - 让 MetaWeb 应用开发更简单 🚀
-
