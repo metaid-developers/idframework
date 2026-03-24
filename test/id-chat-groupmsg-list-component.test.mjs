@@ -198,6 +198,52 @@ test('id-chat-groupmsg-list keeps pending scroll restore until older data is mer
   assert.equal(container.scrollTop, 42);
 });
 
+test('id-chat-groupmsg-list ignores stale pending restore when only a newer tail message is appended', async () => {
+  const registry = setupEnv();
+  globalThis.window = {};
+
+  await import('../idframework/components/id-chat-groupmsg-list.js?case=ignore-stale-pending-on-tail-append');
+  const IdChatGroupmsgList = registry.get('id-chat-groupmsg-list');
+  const instance = new IdChatGroupmsgList();
+
+  const container = {
+    scrollTop: 42,
+    scrollHeight: 640,
+    clientHeight: 320,
+    querySelector: () => null,
+  };
+  instance.shadowRoot.querySelector = (selector) => {
+    if (selector === '.messages-container') return container;
+    return null;
+  };
+
+  instance._pendingScrollRestore = {
+    conversation: 'group_1',
+    top: 42,
+    height: 640,
+    oldestIndex: 100,
+    messageCount: 5,
+    anchorIndex: '100',
+    anchorOffset: 12,
+  };
+
+  let scrollToBottomCalls = 0;
+  instance._scrollToBottom = () => {
+    scrollToBottomCalls += 1;
+  };
+
+  const snapshot = {
+    currentConversation: 'group_1',
+    messages: [{ index: 100 }, { index: 101 }, { index: 102 }, { index: 103 }, { index: 104 }, { index: 105 }],
+  };
+
+  instance._postRenderScrollAdjust(snapshot, { top: 500, nearBottom: true }, 'group_1', 104, 100);
+
+  assert.equal(instance._pendingScrollRestore, null, 'stale restore should be cleared when window only grows at the tail');
+  assert.equal(scrollToBottomCalls, 1, 'tail append near bottom should fall through to normal bottom stick behavior');
+  assert.equal(container.scrollTop, 42, 'stale restore should not reset scroll position');
+});
+
 test('id-chat-groupmsg-list preserves scrollTop on cosmetic rerender when message window is unchanged', async () => {
   const registry = setupEnv();
   globalThis.window = {};
@@ -234,6 +280,55 @@ test('id-chat-groupmsg-list preserves scrollTop on cosmetic rerender when messag
   );
 
   assert.equal(container.scrollTop, 420, 'rerender with unchanged message window should keep previous visual position');
+});
+
+test('id-chat-groupmsg-list clears pending restore after older-load attempt makes no progress', async () => {
+  const registry = setupEnv();
+  let phase = 0;
+  globalThis.window = {
+    IDFramework: {
+      dispatch: async () => {
+        phase = 1;
+      },
+    },
+  };
+
+  await import('../idframework/components/id-chat-groupmsg-list.js?case=clear-pending-after-no-progress-load');
+  const IdChatGroupmsgList = registry.get('id-chat-groupmsg-list');
+  const instance = new IdChatGroupmsgList();
+
+  const container = {
+    scrollTop: 18,
+    scrollHeight: 1200,
+    clientHeight: 320,
+    querySelectorAll: () => [],
+    getBoundingClientRect: () => ({ top: 0 }),
+  };
+  instance.shadowRoot.querySelector = (selector) => {
+    if (selector === '.messages-container') return container;
+    return null;
+  };
+
+  instance._handleChatUpdated = () => {};
+  instance._snapshot = () => (
+    phase === 0
+      ? {
+          currentConversation: 'group_1',
+          conversationType: '1',
+          messages: [{ index: 100 }, { index: 101 }, { index: 102 }, { index: 103 }, { index: 104 }],
+          selfGlobalMetaId: '',
+        }
+      : {
+          currentConversation: 'group_1',
+          conversationType: '1',
+          messages: [{ index: 100 }, { index: 101 }, { index: 102 }, { index: 103 }, { index: 104 }],
+          selfGlobalMetaId: '',
+        }
+  );
+
+  await instance._loadOlderMessages();
+
+  assert.equal(instance._pendingScrollRestore, null, 'no-progress load should not leave stale restore state behind');
 });
 
 test('id-chat-groupmsg-list uses recent restore anchor to refine cosmetic rerender position', async () => {
