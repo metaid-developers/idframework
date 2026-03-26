@@ -11,11 +11,11 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-.claude
 documents
+
+# macOS metadata
 .DS_Store
-
-
+.DS_store
 
 *.local
 
@@ -23,7 +23,6 @@ documents
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
