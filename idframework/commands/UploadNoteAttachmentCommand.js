@@ -1,8 +1,9 @@
-import MetafileUploadHelper from '../utils/metafile-upload.js';
+import PostBuzzCommand from './PostBuzzCommand.js';
 
-export default class UploadNoteAttachmentCommand {
+export default class UploadNoteAttachmentCommand extends PostBuzzCommand {
   constructor(options = {}) {
-    this._uploader = options && options.uploader ? options.uploader : new MetafileUploadHelper();
+    super();
+    this._injectedUploader = options && options.uploader ? options.uploader : null;
   }
 
   async execute({ payload = {}, stores }) {
@@ -10,6 +11,9 @@ export default class UploadNoteAttachmentCommand {
     var options = payload && payload.options && typeof payload.options === 'object'
       ? payload.options
       : {};
-    return await this._uploader.uploadFileToMetafile(file, stores, options);
+    if (this._injectedUploader && typeof this._injectedUploader.uploadFileToMetafile === 'function') {
+      return await this._injectedUploader.uploadFileToMetafile(file, stores, options);
+    }
+    return await this._uploadFileToMetafile(file, stores, options);
   }
 }
