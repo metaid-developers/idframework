@@ -58,9 +58,23 @@ function splitPathAndQuery(routeLike) {
   };
 }
 
-function getRawRouteFromLocation(locationLike) {
+function decodePathSegment(value) {
+  var text = String(value || '');
+  if (!text) return '';
+  try {
+    return decodeURIComponent(text);
+  } catch (_) {
+    return text;
+  }
+}
+
+function getRawRouteFromLocation(locationLike, globalObject) {
   var hash = String(locationLike && locationLike.hash || '').replace(/^#/, '').trim();
   if (hash) return hash;
+
+  if (resolveNoteRouteMode(locationLike, globalObject) === 'hash') {
+    return '/';
+  }
 
   var pathname = String(locationLike && locationLike.pathname || '/').trim();
   var search = String(locationLike && locationLike.search || '');
@@ -76,29 +90,30 @@ export function normalizeNoteRoutePath(pathname) {
   return path || '/';
 }
 
-export function parseNoteRoute(locationLike) {
-  var routeLike = getRawRouteFromLocation(locationLike);
+export function parseNoteRoute(locationLike, globalObject) {
+  var routeLike = getRawRouteFromLocation(locationLike, globalObject);
   var parsed = splitPathAndQuery(routeLike);
   var path = normalizeNoteRoutePath(parsed.path || '/');
   var query = parsed.query;
   var segments = path.split('/').filter(Boolean);
+  var decodedSegments = segments.map(decodePathSegment);
   var params = {};
   var view = 'list';
 
-  if (!segments.length) {
+  if (!decodedSegments.length) {
     view = 'list';
-  } else if (segments[0] === 'mynote') {
+  } else if (decodedSegments[0] === 'mynote') {
     view = 'mynote';
-  } else if (segments[0] === 'draft') {
+  } else if (decodedSegments[0] === 'draft') {
     view = 'draft';
-  } else if (segments[0] === 'note' && segments[1] === 'new') {
+  } else if (decodedSegments[0] === 'note' && decodedSegments[1] === 'new') {
     view = 'editor';
-  } else if (segments[0] === 'note' && segments[1] && segments[2] === 'edit') {
+  } else if (decodedSegments[0] === 'note' && decodedSegments[1] && decodedSegments[2] === 'edit') {
     view = 'editor';
-    params.id = segments[1];
-  } else if (segments[0] === 'note' && segments[1]) {
+    params.id = decodedSegments[1];
+  } else if (decodedSegments[0] === 'note' && decodedSegments[1]) {
     view = 'detail';
-    params.id = segments[1];
+    params.id = decodedSegments[1];
   }
 
   return {

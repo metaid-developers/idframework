@@ -2,8 +2,9 @@ import { parseNoteRoute } from '../utils/note-route.js';
 
 export default class SyncNoteRouteCommand {
   async execute({ payload = {}, stores }) {
-    const locationLike = payload.locationLike || (typeof window !== 'undefined' ? window.location : {});
-    const route = parseNoteRoute(locationLike);
+    const hasWindow = typeof window !== 'undefined';
+    const locationLike = payload.locationLike || (hasWindow ? window.location : {});
+    const route = parseNoteRoute(locationLike, hasWindow ? window : {});
     stores.app.route = route;
     stores.note.route = route;
     return route;

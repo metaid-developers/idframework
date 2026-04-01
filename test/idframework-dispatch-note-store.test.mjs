@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import SyncNoteRouteCommand from '../idframework/commands/SyncNoteRouteCommand.js';
 
 function createAlpineStore() {
   const stores = new Map();
@@ -18,15 +19,34 @@ function createAlpineStore() {
   };
 }
 
-test('IDFramework.dispatch forwards note and draft stores to commands', async () => {
-  const alpine = createAlpineStore();
-  const noteStore = { route: null };
-  const draftStore = { items: [] };
+async function setupFrameworkWindow(alpine) {
+  const existingFramework = globalThis.window && globalThis.window.IDFramework;
 
   globalThis.window = {
     Alpine: alpine,
     addEventListener() {},
+    IDFramework: existingFramework,
+    location: {
+      pathname: '/index.html',
+      search: '',
+      hash: '',
+    },
   };
+
+  if (!window.IDFramework) {
+    const frameworkUrl = pathToFileURL(path.resolve('idframework/idframework.js'));
+    await import(`${frameworkUrl.href}?case=dispatch-note-store`);
+  }
+
+  window.IDFramework._customStoreNames = new Set();
+  return window.IDFramework;
+}
+
+test('IDFramework.dispatch forwards note and draft stores to commands', async () => {
+  const alpine = createAlpineStore();
+  const noteStore = { route: null };
+  const draftStore = { items: [] };
+  const framework = await setupFrameworkWindow(alpine);
 
   alpine.store('wallet', { isConnected: false });
   alpine.store('app', { isLogin: false });
@@ -34,45 +54,84 @@ test('IDFramework.dispatch forwards note and draft stores to commands', async ()
   alpine.store('note', noteStore);
   alpine.store('draft', draftStore);
 
-  const frameworkUrl = pathToFileURL(path.resolve('idframework/idframework.js'));
-  await import(`${frameworkUrl.href}?case=dispatch-note-store`);
-
-  window.IDFramework.initModels({ note: noteStore, draft: draftStore });
+  framework.initModels({ note: noteStore, draft: draftStore });
 
   let capturedStores = null;
-  const originalExecute = window.IDFramework.IDController.execute;
-  window.IDFramework.IDController.execute = async (_eventName, _payload, stores) => {
+  const originalExecute = framework.IDController.execute;
+  framework.IDController.execute = async (_eventName, _payload, stores) => {
     capturedStores = stores;
     return null;
   };
 
-  await window.IDFramework.dispatch('dummy', {});
+  await framework.dispatch('dummy', {});
 
-  window.IDFramework.IDController.execute = originalExecute;
+  framework.IDController.execute = originalExecute;
 
   assert.ok(capturedStores, 'stores should be passed');
   assert.equal(capturedStores.note, noteStore);
   assert.equal(capturedStores.draft, draftStore);
 });
 
+test('IDFramework.dispatch forwards arbitrary custom stores registered via initModels', async () => {
+  const alpine = createAlpineStore();
+  const sandboxStore = { value: 1 };
+  const framework = await setupFrameworkWindow(alpine);
+
+  alpine.store('wallet', { isConnected: false });
+  alpine.store('app', { isLogin: false });
+  alpine.store('user', { user: {} });
+  alpine.store('sandbox', sandboxStore);
+
+  framework.initModels({ sandbox: sandboxStore });
+
+  let capturedStores = null;
+  const originalExecute = framework.IDController.execute;
+  framework.IDController.execute = async (_eventName, _payload, stores) => {
+    capturedStores = stores;
+    return null;
+  };
+
+  await framework.dispatch('dummy', {});
+
+  framework.IDController.execute = originalExecute;
+
+  assert.ok(capturedStores, 'stores should be passed');
+  assert.equal(capturedStores.sandbox, sandboxStore);
+});
+
+test('IDFramework.dispatch does not forward note and draft unless registered via initModels', async () => {
+  const alpine = createAlpineStore();
+  const framework = await setupFrameworkWindow(alpine);
+
+  alpine.store('wallet', { isConnected: false });
+  alpine.store('app', { isLogin: false });
+  alpine.store('user', { user: {} });
+  alpine.store('note', { route: null });
+  alpine.store('draft', { items: [] });
+
+  let capturedStores = null;
+  const originalExecute = framework.IDController.execute;
+  framework.IDController.execute = async (_eventName, _payload, stores) => {
+    capturedStores = stores;
+    return null;
+  };
+
+  await framework.dispatch('dummy', {});
+
+  framework.IDController.execute = originalExecute;
+
+  assert.ok(capturedStores, 'stores should be passed');
+  assert.equal(capturedStores.note, undefined);
+  assert.equal(capturedStores.draft, undefined);
+});
+
 test('IDController.execute auto-resolves note and draft stores when stores are omitted', async () => {
   const alpine = createAlpineStore();
   const noteStore = { route: null };
   const draftStore = { items: [] };
-  const existingFramework = globalThis.window && globalThis.window.IDFramework;
+  const framework = await setupFrameworkWindow(alpine);
 
-  globalThis.window = {
-    Alpine: alpine,
-    addEventListener() {},
-    IDFramework: existingFramework,
-  };
-
-  if (!window.IDFramework) {
-    const frameworkUrl = pathToFileURL(path.resolve('idframework/idframework.js'));
-    await import(`${frameworkUrl.href}?case=execute-note-store`);
-  }
-
-  window.IDFramework.initModels({ note: noteStore, draft: draftStore });
+  framework.initModels({ note: noteStore, draft: draftStore });
 
   const tmpDir = await mkdtemp(path.join(tmpdir(), 'idf-note-store-'));
   const commandPath = path.join(tmpDir, 'CaptureStoresCommand.mjs');
@@ -83,12 +142,12 @@ test('IDController.execute auto-resolves note and draft stores when stores are o
   );
 
   try {
-    window.IDFramework.IDController.register(
+    framework.IDController.register(
       'captureNoteDraftStores',
       pathToFileURL(commandPath).href,
     );
 
-    const capturedStores = await window.IDFramework.IDController.execute('captureNoteDraftStores', {});
+    const capturedStores = await framework.IDController.execute('captureNoteDraftStores', {});
 
     assert.equal(capturedStores.note, noteStore);
     assert.equal(capturedStores.draft, draftStore);
@@ -97,4 +156,25 @@ test('IDController.execute auto-resolves note and draft stores when stores are o
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }
+});
+
+test('SyncNoteRouteCommand updates app.route and note.route', async () => {
+  const command = new SyncNoteRouteCommand();
+  const stores = {
+    app: { route: null },
+    note: { route: null },
+  };
+
+  const route = await command.execute({
+    payload: {
+      locationLike: { hash: '#/note/abc/edit?draftId=9' },
+    },
+    stores,
+  });
+
+  assert.equal(route.view, 'editor');
+  assert.equal(route.params.id, 'abc');
+  assert.equal(route.query.draftId, '9');
+  assert.equal(stores.app.route, route);
+  assert.equal(stores.note.route, route);
 });

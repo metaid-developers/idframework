@@ -15,6 +15,29 @@ test('parseNoteRoute maps /note/:id/edit and query string correctly', () => {
   assert.equal(route.query.draftId, '3');
 });
 
+test('parseNoteRoute treats hash mode pages without route hash as root list route', () => {
+  const route = parseNoteRoute(
+    {
+      pathname: '/demo-note/index.html',
+      search: '?q=ignored',
+      hash: '',
+    },
+    {
+      IDFrameworkConfig: { noteRouteMode: 'hash' },
+    },
+  );
+
+  assert.equal(route.path, '/');
+  assert.equal(route.view, 'list');
+  assert.deepEqual(route.query, {});
+});
+
+test('parseNoteRoute decodes note id params', () => {
+  const route = parseNoteRoute({ hash: '#/note/a%2Fb' });
+  assert.equal(route.view, 'detail');
+  assert.equal(route.params.id, 'a/b');
+});
+
 test('note route helpers provide the full required contract', () => {
   assert.equal(normalizeNoteRoutePath('note/abc'), '/note/abc');
   assert.equal(

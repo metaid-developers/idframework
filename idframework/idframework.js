@@ -29,7 +29,7 @@ class IDFramework {
   }
 
   static getRegisteredStoreNames() {
-    const commonStoreNames = ['user', 'settings', 'chat', 'buzz', 'note', 'draft'];
+    const commonStoreNames = ['user', 'settings', 'chat', 'buzz'];
     const customStoreNames = this._customStoreNames instanceof Set
       ? Array.from(this._customStoreNames)
       : [];
