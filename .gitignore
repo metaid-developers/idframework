@@ -12,6 +12,7 @@ node_modules
 dist
 dist-ssr
 documents
+.worktrees
 
 # macOS metadata
 .DS_Store
