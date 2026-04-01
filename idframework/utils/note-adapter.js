@@ -75,13 +75,16 @@ export function normalizeNoteData(raw, fallback = {}) {
 
 export function parseNoteSummary(rawPin) {
   var pin = rawPin && typeof rawPin === 'object' ? rawPin : {};
-  var parsed = parseJsonLike(
-    pin.contentSummary !== undefined
-      ? pin.contentSummary
-      : pin.noteData !== undefined
-        ? pin.noteData
-        : rawPin,
-  );
+  var parsed = null;
+  if (pin.contentSummary !== undefined) {
+    parsed = parseJsonLike(pin.contentSummary);
+  }
+  if (!parsed && pin.noteData !== undefined) {
+    parsed = parseJsonLike(pin.noteData);
+  }
+  if (!parsed) {
+    parsed = parseJsonLike(rawPin);
+  }
   return normalizeNoteData(parsed, {
     createTime: pin.createTime || pin.timestamp || pin.date || 0,
   });

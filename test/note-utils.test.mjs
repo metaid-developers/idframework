@@ -41,6 +41,16 @@ test('parseNoteSummary accepts JSON string contentSummary and returns normalized
   const normalized = normalizeNoteData('{"title":"Normalized","attachments":["metafile://one.png"]}');
   assert.equal(normalized.title, 'Normalized');
   assert.deepEqual(normalized.attachments, ['metafile://one.png']);
+
+  const fallbackSummary = parseNoteSummary({
+    contentSummary: '{invalid json',
+    noteData: {
+      title: 'Fallback title',
+      content: 'Recovered body',
+    },
+  });
+  assert.equal(fallbackSummary.title, 'Fallback title');
+  assert.equal(fallbackSummary.content, 'Recovered body');
 });
 
 test('mergeNoteAttachments keeps retained refs and appends new upload URIs once', () => {
