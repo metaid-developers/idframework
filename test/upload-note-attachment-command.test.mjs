@@ -49,13 +49,13 @@ test('UploadNoteAttachmentCommand default path uses direct upload for small file
     },
   };
 
-  command._ensureOnchainReady = function () {};
-  command.uploadFileToChainDirect = async function (pickedFile) {
+  command._uploadHost._ensureOnchainReady = function () {};
+  command._uploadHost.uploadFileToChainDirect = async function (pickedFile) {
     directCalls += 1;
     assert.equal(pickedFile.name, 'small.PNG');
     return { txId: 'directtx' };
   };
-  command.runChunkedUploadFlow = async function () {
+  command._uploadHost.runChunkedUploadFlow = async function () {
     chunkedCalls += 1;
     return { txId: 'chunktx' };
   };
@@ -95,12 +95,12 @@ test('UploadNoteAttachmentCommand default path uses chunked upload for large fil
     },
   };
 
-  command._ensureOnchainReady = function () {};
-  command.uploadFileToChainDirect = async function () {
+  command._uploadHost._ensureOnchainReady = function () {};
+  command._uploadHost.uploadFileToChainDirect = async function () {
     directCalls += 1;
     return { txId: 'directtx' };
   };
-  command.runChunkedUploadFlow = async function (options) {
+  command._uploadHost.runChunkedUploadFlow = async function (options) {
     chunkedCalls += 1;
     assert.equal(options && options.asynchronous, false);
     return { txId: 'chunktx' };
@@ -119,6 +119,39 @@ test('UploadNoteAttachmentCommand default path uses chunked upload for large fil
   } finally {
     globalThis.window = originalWindow;
     globalThis.FileReader = originalFileReader;
+  }
+});
+
+test('UploadNoteAttachmentCommand default path falls back to createPin upload on lock_write error', async () => {
+  const command = new UploadNoteAttachmentCommand();
+  const file = new File(['img'], 'demo.png', { type: 'image/png' });
+  const originalWindow = globalThis.window;
+  let fallbackCalls = 0;
+
+  globalThis.window = {
+    metaidwallet: {
+      async createPin() {
+        return { txids: ['fallbacktx'] };
+      },
+    },
+  };
+
+  command._uploadHost._ensureOnchainReady = function () {};
+  command._uploadHost.uploadFileToChainDirect = async function () {
+    throw new Error('failed to save upload record: Error 1290 (HY000): The MySQL server is running with the LOCK_WRITE option');
+  };
+  command._uploadHost._uploadFileByCreatePin = async function (pickedFile) {
+    fallbackCalls += 1;
+    assert.equal(pickedFile.name, 'demo.png');
+    return 'metafile://fallbacktxi0.png';
+  };
+
+  try {
+    const result = await command.execute({ payload: { file, options: { chain: 'mvc' } }, stores: {} });
+    assert.equal(result, 'metafile://fallbacktxi0.png');
+    assert.equal(fallbackCalls, 1);
+  } finally {
+    globalThis.window = originalWindow;
   }
 });
 

@@ -128,16 +128,7 @@ export default class MetafileUploadHelper {
 
     var fromSource = this._normalizeChain(source && source.chain ? source.chain : '');
     if (fromSource) return fromSource;
-
-    if (typeof Alpine !== 'undefined' && Alpine && typeof Alpine.store === 'function') {
-      var chainFeeStore = Alpine.store('chainFee');
-      var fromStore = this._normalizeChain(chainFeeStore && chainFeeStore.currentChain ? chainFeeStore.currentChain : '');
-      if (fromStore) return fromStore;
-    }
-
-    var cfg = (typeof window !== 'undefined' && window.IDConfig) ? window.IDConfig : {};
-    var fromCfg = this._normalizeChain(cfg.CHAT_CHAIN || cfg.CHAIN || cfg.DEFAULT_CHAIN);
-    return fromCfg || 'mvc';
+    return 'mvc';
   }
 
   _getFeeRate(options = {}) {
@@ -149,27 +140,7 @@ export default class MetafileUploadHelper {
 
     var fromPayload = Number(options && options.feeRate);
     if (Number.isFinite(fromPayload) && fromPayload > 0) return fromPayload;
-
-    var chain = this._resolveChain(options);
-    if (typeof Alpine !== 'undefined' && Alpine && typeof Alpine.store === 'function') {
-      var chainFeeStore = Alpine.store('chainFee');
-      if (chainFeeStore && typeof chainFeeStore.getSelectedFeeRate === 'function') {
-        var fromStoreGetter = Number(chainFeeStore.getSelectedFeeRate(chain));
-        if (Number.isFinite(fromStoreGetter) && fromStoreGetter > 0) return fromStoreGetter;
-      }
-      if (chainFeeStore && chainFeeStore[chain] && typeof chainFeeStore[chain] === 'object') {
-        var chainState = chainFeeStore[chain];
-        var feeType = String(chainState.selectedFeeType || '').trim();
-        var fromStateSelected = Number(chainState[feeType] || 0);
-        if (Number.isFinite(fromStateSelected) && fromStateSelected > 0) return fromStateSelected;
-        var fromStateEconomy = Number(chainState.economyFee || 0);
-        if (Number.isFinite(fromStateEconomy) && fromStateEconomy > 0) return fromStateEconomy;
-      }
-    }
-
-    var cfg = (typeof window !== 'undefined' && window.IDConfig) ? window.IDConfig : {};
-    var rate = Number(cfg.FEE_RATE);
-    return Number.isFinite(rate) && rate > 0 ? rate : 1;
+    return 1;
   }
 
   _errorMessage(error) {
