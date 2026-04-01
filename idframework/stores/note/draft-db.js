@@ -206,6 +206,25 @@ export class NoteDraftDB {
     });
   }
 
+  async replaceMediaFilesByDraftId(id, mediaFiles) {
+    var draftId = Number(id);
+    await this._storage.deleteByIndex(MEDIA_STORE, 'draftId', draftId);
+    var rows = Array.isArray(mediaFiles) ? mediaFiles : [];
+    for (var i = 0; i < rows.length; i += 1) {
+      var row = rows[i] && typeof rows[i] === 'object' ? rows[i] : {};
+      await this.saveMediaFile({
+        draftId: draftId,
+        blobUrl: String(row.blobUrl || ''),
+        file: row.file,
+        type: String(row.type || ''),
+        name: String(row.name || ''),
+        mediaId: String(row.mediaId || ''),
+        pinId: String(row.pinId || ''),
+        createdAt: row.createdAt,
+      });
+    }
+  }
+
   async deleteDraft(id) {
     var mediaFiles = await this.getMediaFilesByDraftId(id);
     mediaFiles.forEach(function revoke(mediaFile) {

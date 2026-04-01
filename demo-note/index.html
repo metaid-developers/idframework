@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <title>IDFramework - On-chain Notes Demo</title>
+  <link rel="stylesheet" href="./app.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "@idf/": "../idframework/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="note-page">
+    <div class="toolbar">
+      <div class="locale-switcher" role="group" aria-label="Language">
+        <button type="button" class="locale-btn" data-action="set-locale" data-locale-value="zh">中文</button>
+        <button type="button" class="locale-btn" data-action="set-locale" data-locale-value="en">EN</button>
+      </div>
+      <id-connect-button></id-connect-button>
+    </div>
+
+    <id-userinfo-float-panel></id-userinfo-float-panel>
+
+    <main class="container">
+      <section class="hero">
+        <h1 data-i18n="note.page.title">On-chain Notes</h1>
+        <p data-i18n="note.page.subtitle">A single-page notebook powered by MetaID and IDFramework</p>
+      </section>
+
+      <id-note-shell></id-note-shell>
+    </main>
+  </div>
+
+  <script src="../idframework/vendors/metaid.js"></script>
+  <script src="../idframework/vendors/marked.js"></script>
+  <script type="module" src="../idframework/idframework.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

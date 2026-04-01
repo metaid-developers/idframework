@@ -1,0 +1,93 @@
+:root {
+  --id-note-content-width: 760px;
+  --id-note-bg: #081019;
+  --id-note-panel: rgba(11, 18, 30, 0.76);
+  --id-note-border: rgba(255, 255, 255, 0.08);
+  --id-note-text: rgba(244, 247, 255, 0.94);
+  --id-note-muted: rgba(219, 227, 244, 0.68);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--id-note-text);
+  background:
+    radial-gradient(circle at top left, rgba(98, 167, 255, 0.18), transparent 32%),
+    radial-gradient(circle at top right, rgba(255, 194, 106, 0.12), transparent 30%),
+    linear-gradient(180deg, #07111c 0%, #09131f 48%, #060b13 100%);
+}
+
+.note-page {
+  min-height: 100vh;
+  padding: 24px 16px 64px;
+}
+
+.toolbar {
+  max-width: var(--id-note-content-width);
+  margin: 0 auto 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.locale-switcher {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.locale-btn {
+  border: 1px solid var(--id-note-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--id-note-text);
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.container {
+  max-width: var(--id-note-content-width);
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+
+.hero {
+  padding: 22px 24px;
+  border-radius: 24px;
+  background: var(--id-note-panel);
+  border: 1px solid var(--id-note-border);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.26);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3rem);
+  letter-spacing: -0.03em;
+}
+
+.hero p {
+  margin: 10px 0 0;
+  color: var(--id-note-muted);
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero {
+    padding: 18px;
+  }
+}
