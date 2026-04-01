@@ -271,6 +271,28 @@ app.route = {
 - `attachments` 兼容 `metafile://<pinId>` 与 `metafile://<pinId>.<ext>`。
 - `coverImg` 兼容 `metafile://` 格式。
 
+## API Contract Compatibility
+
+为保证与 `idnote-sample` 的行为一致，笔记域读取接口按以下 contract 实现：
+
+- 公开列表
+  - `GET /pin/path/list`
+  - 参数：`path=/protocols/simplenote`、`cursor`、`size`
+- 详情
+  - `GET /pin/:numberOrId`
+- 我的笔记
+  - `GET /address/pin/list/:address`
+  - 参数：`path=/protocols/simplenote`、`cursor`、`size`
+- 作者资料
+  - `GET /info/address/:address`
+
+如果现有通用 command 的 endpoint、返回结构或参数拼装方式与以上 contract 不一致，则以兼容 `idnote-sample` 为优先：
+
+- 能安全复用的继续复用。
+- 不能直接复用的新增 note-specific command 或对现有通用 command 做兼容增强。
+
+implementation plan 不得假设 `/pin/:id` 与 `/api/pin/:id` 完全等价，必须在落地时按实际接口结果校验后决定是复用还是扩展。
+
 ## Create and Update Rules
 
 ### Create
