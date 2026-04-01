@@ -135,12 +135,26 @@ class IdNoteMarkdownView extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        .content { font-size: 15px; line-height: 1.65; color: #111827; }
+        .content {
+          font-size: 15px;
+          line-height: 1.65;
+          color: var(--note-markdown-text, #111827);
+          background: var(--note-markdown-bg, transparent);
+        }
         .md-fallback { white-space: pre-wrap; word-break: break-word; }
         .content :where(img, video) { max-width: 100%; height: auto; }
-        .content :where(a) { color: #2563eb; }
-        .content :where(pre) { overflow: auto; padding: 12px; background: #f3f4f6; border-radius: 10px; }
-        .content :where(code) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+        .content :where(a) { color: var(--note-markdown-link, #2563eb); }
+        .content :where(pre) {
+          overflow: auto;
+          padding: 12px;
+          background: var(--note-markdown-code-bg, #f3f4f6);
+          border-radius: 10px;
+          border: 1px solid var(--note-markdown-code-border, #e5e7eb);
+        }
+        .content :where(code) {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          color: var(--note-markdown-code-text, inherit);
+        }
       </style>
       <div class="content">${html}</div>
     `;

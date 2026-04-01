@@ -24,6 +24,10 @@ export default {
     loadingTitle: 'Loading notes',
     loadingMessage: 'Please wait...',
     errorTitle: 'Failed to load notes',
+    pagerLabel: 'Pagination',
+    pagerPrevious: 'Previous',
+    pagerNext: 'Next',
+    pagerPage: 'Page {page}',
   },
   state: {
     emptyTitle: 'Nothing here yet',

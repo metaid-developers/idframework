@@ -23,6 +23,26 @@ function normalizePinListResponse(response) {
   };
 }
 
+function normalizePositive(value, fallback) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function resolveCurrentCursor(payloadCursor, requestCursor, listStore) {
+  if (payloadCursor !== undefined && payloadCursor !== null) return String(payloadCursor);
+  if (requestCursor !== undefined && requestCursor !== null) return String(requestCursor);
+  if (listStore && listStore.currentCursor !== undefined && listStore.currentCursor !== null) {
+    return String(listStore.currentCursor);
+  }
+  return '0';
+}
+
+function resolveCursorHistory(payloadHistory, listStore) {
+  if (Array.isArray(payloadHistory)) return payloadHistory.slice();
+  if (listStore && Array.isArray(listStore.cursorHistory)) return listStore.cursorHistory.slice();
+  return ['0'];
+}
+
 export default class FetchNoteListCommand {
   async execute({ payload = {}, stores = {}, delegate }) {
     if (typeof delegate !== 'function') {
@@ -30,12 +50,17 @@ export default class FetchNoteListCommand {
     }
 
     const listStore = stores.note && stores.note.publicList ? stores.note.publicList : null;
-    const cursor = payload.cursor ?? 0;
-    const size = Number(payload.size ?? 20);
+    const requestCursor = payload.cursor ?? 0;
+    const sizeValue = normalizePositive(payload.size ?? payload.pageSize ?? 20, 20);
+    const replaceMode = !!payload.replace;
+    const pageValue = normalizePositive(payload.page ?? (listStore && listStore.page) ?? 1, 1);
+    const pageSizeValue = normalizePositive(payload.pageSize ?? sizeValue, sizeValue);
+    const currentCursor = resolveCurrentCursor(payload.currentCursor, requestCursor, listStore);
+    const cursorHistory = resolveCursorHistory(payload.cursorHistory, listStore);
     const query = new URLSearchParams({
       path: NOTE_PROTOCOL,
-      cursor: String(cursor),
-      size: String(Number.isFinite(size) && size > 0 ? size : 20),
+      cursor: String(requestCursor),
+      size: String(sizeValue),
     });
 
     if (listStore) {
@@ -53,18 +78,29 @@ export default class FetchNoteListCommand {
         noteData: adaptNoteSummary(pin).noteData,
       }));
       const existingItems = listStore && Array.isArray(listStore.items) ? listStore.items : [];
-      const items = shouldAppendPage(payload.cursor) ? existingItems.concat(pageItems) : pageItems;
+      const shouldAppend = !replaceMode && shouldAppendPage(payload.cursor);
+      const items = shouldAppend ? existingItems.concat(pageItems) : pageItems;
+      const hasMore = normalized.nextCursor !== '' && normalized.nextCursor !== null && normalized.nextCursor !== undefined;
+      const historySnapshot = Array.isArray(cursorHistory) ? cursorHistory.slice() : [];
       const result = {
         items,
         total: normalized.total,
         cursor: normalized.nextCursor,
-        hasMore: normalized.nextCursor !== '' && normalized.nextCursor !== null && normalized.nextCursor !== undefined,
+        hasMore: hasMore,
+        page: pageValue,
+        pageSize: pageSizeValue,
+        currentCursor: currentCursor,
+        cursorHistory: historySnapshot,
       };
 
       if (listStore) {
         listStore.items = items;
         listStore.cursor = result.cursor;
         listStore.hasMore = result.hasMore;
+        listStore.page = pageValue;
+        listStore.pageSize = pageSizeValue;
+        listStore.currentCursor = currentCursor;
+        listStore.cursorHistory = historySnapshot;
       }
 
       return result;

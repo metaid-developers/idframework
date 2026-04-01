@@ -173,3 +173,228 @@ test('demo-note loadRouteData redirects blocked encrypted edits back to detail r
   assert.ok(dispatchCalls.some(([eventName]) => eventName === 'syncNoteRoute'));
   assert.ok(dispatchCalls.some(([eventName]) => eventName === 'fetchNoteDetail'));
 });
+
+test('demo-note loadRouteData resets public list pagination when re-entering home', async () => {
+  const registry = createStoreRegistry();
+  const dispatchCalls = [];
+
+  globalThis.window = {
+    __IDFRAMEWORK_DISABLE_AUTO_BOOTSTRAP: true,
+    location: { pathname: '/demo-note/index.html', search: '', hash: '#/' },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    ServiceLocator: {},
+    IDFrameworkConfig: {},
+    Alpine: {
+      store: registry.store,
+    },
+    IDFramework: {
+      dispatch(eventName, payload) {
+        dispatchCalls.push([eventName, payload]);
+        return Promise.resolve(null);
+      },
+      I18n: {
+        init() {},
+        registerMessages() {},
+      },
+      IDController: {
+        register() {},
+      },
+      loadComponent() {
+        return Promise.resolve();
+      },
+      init(models) {
+        Object.keys(models || {}).forEach((name) => {
+          registry.store(name, JSON.parse(JSON.stringify(models[name])));
+        });
+      },
+    },
+  };
+  globalThis.document = {
+    querySelectorAll() {
+      return [];
+    },
+    addEventListener() {},
+  };
+  globalThis.Alpine = globalThis.window.Alpine;
+
+  const module = await import('../demo-note/app.js?case=route-reset-public');
+  registry.store('note', {
+    route: { path: '/note/old-note', view: 'detail', params: { id: 'old-note' }, query: {} },
+    publicList: {
+      items: [{ pin: { id: 'stale' }, noteData: { title: 'Stale' } }],
+      cursor: 'cursor-5',
+      hasMore: true,
+      isLoading: false,
+      error: '',
+      page: 5,
+      pageSize: 20,
+      currentCursor: 'cursor-4',
+      cursorHistory: ['0', 'cursor-1', 'cursor-2', 'cursor-3', 'cursor-4'],
+    },
+    myList: { items: [], cursor: 0, hasMore: true, isLoading: false, error: '', page: 1, pageSize: 20, currentCursor: '0', cursorHistory: ['0'] },
+    detail: { pinId: '', pin: null, noteData: null, author: null, isLoading: false, error: '' },
+    editor: { mode: 'create', pinId: '', form: {}, existingAttachments: [], pendingAttachments: [], currentDraftId: null, isLoading: false, isSaving: false, error: '' },
+  });
+
+  await module.loadRouteData({ path: '/', view: 'list', params: {}, query: {} });
+
+  assert.deepEqual(dispatchCalls, [[
+    'fetchNoteList',
+    {
+      cursor: '0',
+      size: 20,
+      replace: true,
+      page: 1,
+      pageSize: 20,
+      currentCursor: '0',
+      cursorHistory: ['0'],
+    },
+  ]]);
+});
+
+test('demo-note loadRouteData resets my-note pagination with resolved address', async () => {
+  const registry = createStoreRegistry();
+  const dispatchCalls = [];
+
+  globalThis.window = {
+    __IDFRAMEWORK_DISABLE_AUTO_BOOTSTRAP: true,
+    location: { pathname: '/demo-note/index.html', search: '', hash: '#/mynote' },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    ServiceLocator: {},
+    IDFrameworkConfig: {},
+    Alpine: {
+      store: registry.store,
+    },
+    IDFramework: {
+      dispatch(eventName, payload) {
+        dispatchCalls.push([eventName, payload]);
+        return Promise.resolve(null);
+      },
+      I18n: {
+        init() {},
+        registerMessages() {},
+      },
+      IDController: {
+        register() {},
+      },
+      loadComponent() {
+        return Promise.resolve();
+      },
+      init(models) {
+        Object.keys(models || {}).forEach((name) => {
+          registry.store(name, JSON.parse(JSON.stringify(models[name])));
+        });
+      },
+    },
+  };
+  globalThis.document = {
+    querySelectorAll() {
+      return [];
+    },
+    addEventListener() {},
+  };
+  globalThis.Alpine = globalThis.window.Alpine;
+
+  const module = await import('../demo-note/app.js?case=route-reset-my');
+  registry.store('wallet', { address: '1owner' });
+  registry.store('user', { user: {}, users: {}, isLoading: false, error: null, showProfileEditModal: false });
+  registry.store('note', {
+    route: { path: '/note/old-note', view: 'detail', params: { id: 'old-note' }, query: {} },
+    publicList: { items: [], cursor: 0, hasMore: true, isLoading: false, error: '', page: 1, pageSize: 20, currentCursor: '0', cursorHistory: ['0'] },
+    myList: {
+      items: [{ pin: { id: 'stale' }, noteData: { title: 'Old mine' } }],
+      cursor: 'cursor-5',
+      hasMore: true,
+      isLoading: false,
+      error: '',
+      page: 5,
+      pageSize: 20,
+      currentCursor: 'cursor-4',
+      cursorHistory: ['0', 'cursor-1', 'cursor-2', 'cursor-3', 'cursor-4'],
+    },
+    detail: { pinId: '', pin: null, noteData: null, author: null, isLoading: false, error: '' },
+    editor: { mode: 'create', pinId: '', form: {}, existingAttachments: [], pendingAttachments: [], currentDraftId: null, isLoading: false, isSaving: false, error: '' },
+  });
+
+  await module.loadRouteData({ path: '/mynote', view: 'mynote', params: {}, query: {} });
+
+  assert.deepEqual(dispatchCalls, [[
+    'fetchMyNoteList',
+    {
+      address: '1owner',
+      cursor: '0',
+      size: 20,
+      replace: true,
+      page: 1,
+      pageSize: 20,
+      currentCursor: '0',
+      cursorHistory: ['0'],
+    },
+  ]]);
+});
+
+test('demo-note loadRouteData skips my-note reset fetch when no address is available', async () => {
+  const registry = createStoreRegistry();
+  const dispatchCalls = [];
+
+  globalThis.window = {
+    __IDFRAMEWORK_DISABLE_AUTO_BOOTSTRAP: true,
+    location: { pathname: '/demo-note/index.html', search: '', hash: '#/mynote' },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    ServiceLocator: {},
+    IDFrameworkConfig: {},
+    Alpine: {
+      store: registry.store,
+    },
+    IDFramework: {
+      dispatch(eventName, payload) {
+        dispatchCalls.push([eventName, payload]);
+        return Promise.resolve(null);
+      },
+      I18n: {
+        init() {},
+        registerMessages() {},
+      },
+      IDController: {
+        register() {},
+      },
+      loadComponent() {
+        return Promise.resolve();
+      },
+      init(models) {
+        Object.keys(models || {}).forEach((name) => {
+          registry.store(name, JSON.parse(JSON.stringify(models[name])));
+        });
+      },
+    },
+  };
+  globalThis.document = {
+    querySelectorAll() {
+      return [];
+    },
+    addEventListener() {},
+  };
+  globalThis.Alpine = globalThis.window.Alpine;
+
+  const module = await import('../demo-note/app.js?case=route-reset-my-no-address');
+  registry.store('wallet', { address: '' });
+  registry.store('user', { user: {}, users: {}, isLoading: false, error: null, showProfileEditModal: false });
+  registry.store('note', {
+    route: { path: '/mynote', view: 'mynote', params: {}, query: {} },
+    publicList: { items: [], cursor: 0, hasMore: true, isLoading: false, error: '', page: 1, pageSize: 20, currentCursor: '0', cursorHistory: ['0'] },
+    myList: { items: [], cursor: 0, hasMore: true, isLoading: false, error: '', page: 1, pageSize: 20, currentCursor: '0', cursorHistory: ['0'] },
+    detail: { pinId: '', pin: null, noteData: null, author: null, isLoading: false, error: '' },
+    editor: { mode: 'create', pinId: '', form: {}, existingAttachments: [], pendingAttachments: [], currentDraftId: null, isLoading: false, isSaving: false, error: '' },
+  });
+
+  const result = await module.loadRouteData({ path: '/mynote', view: 'mynote', params: {}, query: {} });
+
+  assert.equal(result, null);
+  assert.deepEqual(dispatchCalls, []);
+});

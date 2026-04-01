@@ -143,11 +143,14 @@ class IdNoteDetail extends HTMLElement {
     } else {
       var tags = Array.isArray(noteData.tags) ? noteData.tags : [];
       var attachments = Array.isArray(noteData.attachments) ? noteData.attachments : [];
-      var attachmentHtml = attachments.map((attachment, index) => {
+      var attachmentItems = attachments.map((attachment, index) => {
         var href = this._escapeHtml(resolveAttachmentUrl(attachment));
         var label = this._escapeHtml(this._t('note.detail.attachmentItem', 'Attachment {index}', { index: index + 1 }) || ('Attachment ' + (index + 1)));
         return `<a class="attachment" href="${href}" target="_blank" rel="noreferrer">${label}</a>`;
       }).join('');
+      var attachmentsSection = attachments.length
+        ? `<section class="attachments"><h2>${this._escapeHtml(this._t('note.detail.attachments', 'Attachments'))}</h2><div class="attachmentGrid">${attachmentItems}</div></section>`
+        : '';
       var coverUrl = resolveNoteCoverUrl(noteData.coverImg || '');
       bodyHtml = `
         <article class="detail">
@@ -161,8 +164,10 @@ class IdNoteDetail extends HTMLElement {
           </header>
           ${coverUrl ? `<img class="cover" src="${this._escapeHtml(coverUrl)}" alt="${this._escapeHtml(noteData.title || 'Note cover')}" loading="lazy" />` : ''}
           ${tags.length ? `<div class="tags">${tags.map((tag) => `<span class="tag">${this._escapeHtml(tag)}</span>`).join('')}</div>` : ''}
-          <id-note-markdown-view content="${this._escapeHtml(noteData.content || '')}" attachments="${this._escapeHtml(JSON.stringify(attachments))}"></id-note-markdown-view>
-          ${attachmentHtml ? `<section class="attachments"><h2>${this._escapeHtml(this._t('note.detail.attachments', 'Attachments'))}</h2><div class="attachmentGrid">${attachmentHtml}</div></section>` : ''}
+          <div class="body-shell">
+            <id-note-markdown-view content="${this._escapeHtml(noteData.content || '')}" attachments="${this._escapeHtml(JSON.stringify(attachments))}"></id-note-markdown-view>
+            ${attachmentsSection}
+          </div>
         </article>
       `;
     }
@@ -178,6 +183,21 @@ class IdNoteDetail extends HTMLElement {
           background: rgba(7, 10, 18, 0.54);
           border: 1px solid rgba(255,255,255,0.08);
           color: rgba(255,255,255,0.9);
+        }
+        .body-shell {
+          background: var(--note-detail-body-bg, #f8fafc);
+          color: var(--note-detail-body-text, #0f172a);
+          border-radius: 16px;
+          padding: 24px;
+          border: 1px solid rgba(15, 23, 42, 0.12);
+          box-shadow: 0 16px 42px rgba(15, 23, 42, 0.4);
+          display: grid;
+          gap: 18px;
+          --note-markdown-text: var(--note-detail-body-text, #0f172a);
+          --note-markdown-link: var(--note-detail-body-link, #1d4ed8);
+          --note-markdown-code-bg: var(--note-detail-body-code-bg, #f3f4f6);
+          --note-markdown-code-border: var(--note-detail-body-code-border, #d1d5db);
+          --note-markdown-bg: var(--note-detail-body-bg, #f8fafc);
         }
         .header {
           display: flex;
@@ -216,16 +236,16 @@ class IdNoteDetail extends HTMLElement {
           color: rgba(255,255,255,0.76);
           font-size: 12px;
         }
-        .attachments { display: grid; gap: 10px; }
+        .attachments { display: grid; gap: 10px; margin: 0; }
         .attachments h2 { margin: 0; font-size: 16px; }
         .attachmentGrid { display: grid; gap: 8px; }
         .attachment {
           display: inline-flex;
           padding: 10px 12px;
           border-radius: 12px;
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.08);
-          color: rgba(220,230,255,0.92);
+          background: var(--note-detail-body-bg, #f8fafc);
+          border: 1px solid rgba(15, 23, 42, 0.12);
+          color: var(--note-detail-body-text, #0f172a);
           text-decoration: none;
           word-break: break-all;
         }

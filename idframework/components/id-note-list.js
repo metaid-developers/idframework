@@ -16,6 +16,13 @@ class IdNoteList extends HTMLElement {
     this._observer = null;
     this._sentinel = null;
     this._onNoteOpen = this._handleNoteOpen.bind(this);
+    this._pagerPrev = null;
+    this._pagerNext = null;
+    this._onPagerClick = this._handlePagerClick.bind(this);
+    this._page = 1;
+    this._pageSize = 20;
+    this._currentCursor = '0';
+    this._cursorHistory = ['0'];
   }
 
   static get observedAttributes() {
@@ -45,6 +52,7 @@ class IdNoteList extends HTMLElement {
       this._watchTimer = null;
     }
     this._teardownObserver();
+    this._teardownPager();
     if (typeof this.removeEventListener === 'function') {
       this.removeEventListener('note-open', this._onNoteOpen);
     }
@@ -108,6 +116,10 @@ class IdNoteList extends HTMLElement {
       if (list.hasMore === undefined) list.hasMore = true;
       if (list.isLoading === undefined) list.isLoading = false;
       if (list.error === undefined) list.error = '';
+      if (list.page === undefined) list.page = 1;
+      if (list.pageSize === undefined) list.pageSize = 20;
+      if (list.currentCursor === undefined) list.currentCursor = '0';
+      if (!Array.isArray(list.cursorHistory)) list.cursorHistory = ['0'];
     });
   }
 
@@ -130,6 +142,10 @@ class IdNoteList extends HTMLElement {
       segment.hasMore ? '1' : '0',
       segment.isLoading ? '1' : '0',
       String(segment.error || ''),
+      String(segment.page ?? ''),
+      String(segment.pageSize ?? ''),
+      String(segment.currentCursor ?? ''),
+      Array.isArray(segment.cursorHistory) ? segment.cursorHistory.join(',') : '',
     ].join('|');
   }
 
@@ -154,6 +170,13 @@ class IdNoteList extends HTMLElement {
     this._loading = !!segment.isLoading;
     this._error = String(segment.error || '').trim();
     this._hasMore = !!segment.hasMore;
+    this._page = Number(segment.page ?? 1) || 1;
+    this._pageSize = Number(segment.pageSize ?? 20) || 20;
+    this._currentCursor = String(segment.currentCursor ?? '0');
+    this._cursorHistory = Array.isArray(segment.cursorHistory) ? segment.cursorHistory.slice() : ['0'];
+    if (!this._cursorHistory.length) {
+      this._cursorHistory = ['0'];
+    }
   }
 
   _teardownObserver() {
@@ -209,8 +232,134 @@ class IdNoteList extends HTMLElement {
       return `<id-note-card note="${this._escapeAttribute(json)}"></id-note-card>`;
     }).join('');
 
-    var sentinelHtml = this._hasMore ? `<div class="sentinel" aria-hidden="true"></div>` : '';
-    return `<div class="grid">${cardsHtml}</div>${sentinelHtml}`;
+    var pagerHtml = this._renderPager();
+    return `<div class="grid">${cardsHtml}</div>${pagerHtml}`;
+  }
+
+  _renderPager() {
+    if (!this._items || this._items.length === 0) return '';
+    var mode = this._normalizeMode(this.getAttribute('mode'));
+    var segment = this._segmentFromStore();
+    var nextCursor = segment && segment.cursor !== undefined && segment.cursor !== null ? String(segment.cursor).trim() : '';
+    var hasResolvedAddress = mode !== 'my' || !!this._resolveOwnerAddress();
+    var prevAvailable = Array.isArray(this._cursorHistory) && this._cursorHistory.length > 1 && !this._loading && hasResolvedAddress;
+    var nextAvailable = this._hasMore && !this._loading && nextCursor !== '' && hasResolvedAddress;
+    var prevLabel = this._t('note.list.pagerPrevious', 'Previous');
+    var nextLabel = this._t('note.list.pagerNext', 'Next');
+    var pageLabel = String(this._t('note.list.pagerPage', 'Page {page}', { page: this._page }) || '');
+    pageLabel = pageLabel.replace(/\{page\}/g, String(this._page));
+    var pagerLabel = this._t('note.list.pagerLabel', 'Pagination');
+    return `
+      <footer class="pager" part="pager" role="group" aria-label="${this._escapeAttribute(pagerLabel)}">
+        <button type="button" class="pager-button prev-button" data-action="prev"${prevAvailable ? '' : ' disabled'}>${this._escapeHtml(prevLabel)}</button>
+        <span class="pager-page">${this._escapeHtml(pageLabel)}</span>
+        <button type="button" class="pager-button next-button" data-action="next"${nextAvailable ? '' : ' disabled'}>${this._escapeHtml(nextLabel)}</button>
+      </footer>
+    `;
+  }
+
+  _wirePager() {
+    this._teardownPager();
+    if (!this.shadowRoot || typeof this.shadowRoot.querySelector !== 'function') return;
+    var prevButton = this.shadowRoot.querySelector('[data-action="prev"]');
+    var nextButton = this.shadowRoot.querySelector('[data-action="next"]');
+    if (prevButton && typeof prevButton.addEventListener === 'function') {
+      prevButton.addEventListener('click', this._onPagerClick);
+      this._pagerPrev = prevButton;
+    }
+    if (nextButton && typeof nextButton.addEventListener === 'function') {
+      nextButton.addEventListener('click', this._onPagerClick);
+      this._pagerNext = nextButton;
+    }
+  }
+
+  _teardownPager() {
+    if (this._pagerPrev && typeof this._pagerPrev.removeEventListener === 'function') {
+      this._pagerPrev.removeEventListener('click', this._onPagerClick);
+    }
+    if (this._pagerNext && typeof this._pagerNext.removeEventListener === 'function') {
+      this._pagerNext.removeEventListener('click', this._onPagerClick);
+    }
+    this._pagerPrev = null;
+    this._pagerNext = null;
+  }
+
+  _handlePagerClick(event) {
+    var target = event && event.currentTarget ? event.currentTarget : event;
+    var action = target && typeof target.getAttribute === 'function' ? String(target.getAttribute('data-action') || '') : '';
+    if (!action) return;
+    this._changePage(action);
+  }
+
+  _changePage(action) {
+    return this._handlePagerAction(action);
+  }
+
+  async _handlePagerAction(action) {
+    if (!action || (action !== 'next' && action !== 'prev')) return null;
+    if (this._loading) return null;
+    var segment = this._segmentFromStore();
+    if (!segment) return null;
+    var mode = this._normalizeMode(this.getAttribute('mode'));
+    var commandName = mode === 'my' ? 'fetchMyNoteList' : 'fetchNoteList';
+    var currentPage = Number(segment.page ?? 1) || 1;
+    var pageSize = Number(segment.pageSize ?? 20) || 20;
+    var history = Array.isArray(segment.cursorHistory) ? segment.cursorHistory.slice() : ['0'];
+    if (!history.length) history = ['0'];
+    var nextCursor = String(segment.cursor || '');
+    var ownerAddress = mode === 'my' ? this._resolveOwnerAddress() : '';
+    if (mode === 'my' && !ownerAddress) return null;
+    if (action === 'next') {
+      if (!segment.hasMore || !nextCursor) return null;
+      var nextHistory = history.concat(nextCursor);
+      var payload = {
+        replace: true,
+        cursor: nextCursor,
+        size: pageSize,
+        page: currentPage + 1,
+        pageSize: pageSize,
+        currentCursor: nextCursor,
+        cursorHistory: nextHistory,
+      };
+      if (mode === 'my') payload.address = ownerAddress;
+      return this._dispatchPagerCommand(commandName, payload);
+    }
+    if (action === 'prev') {
+      if (history.length <= 1) return null;
+      var previousHistory = history.slice(0, -1);
+      var previousCursor = String(previousHistory[previousHistory.length - 1] || '0');
+      var payloadPrev = {
+        replace: true,
+        cursor: previousCursor,
+        size: pageSize,
+        page: Math.max(1, currentPage - 1),
+        pageSize: pageSize,
+        currentCursor: previousCursor,
+        cursorHistory: previousHistory,
+      };
+      if (mode === 'my') payloadPrev.address = ownerAddress;
+      return this._dispatchPagerCommand(commandName, payloadPrev);
+    }
+    return null;
+  }
+
+  _dispatchPagerCommand(commandName, payload) {
+    if (typeof window === 'undefined' || !window.IDFramework || typeof window.IDFramework.dispatch !== 'function') {
+      return Promise.resolve(null);
+    }
+    this._loading = true;
+    this.render();
+    return Promise.resolve(window.IDFramework.dispatch(commandName, payload))
+      .finally(() => {
+        this._checkContext(true);
+      });
+  }
+
+  _resolveOwnerAddress() {
+    var wallet = this._getStore('wallet') || {};
+    var userStore = this._getStore('user') || {};
+    var user = userStore && userStore.user ? userStore.user : {};
+    return String(wallet.address || user.address || '').trim();
   }
 
   _handleNoteOpen(event) {
@@ -241,9 +390,31 @@ class IdNoteList extends HTMLElement {
           grid-template-columns: 1fr;
           gap: 12px;
         }
-        .sentinel {
-          height: 1px;
-          width: 100%;
+        .pager {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-top: 16px;
+          padding-top: 12px;
+          border-top: 1px solid rgba(255,255,255,0.12);
+        }
+        .pager-page {
+          font-weight: 600;
+        }
+        .pager-button {
+          border: 0;
+          border-radius: 999px;
+          padding: 6px 16px;
+          font-size: 13px;
+          line-height: 1;
+          cursor: pointer;
+          background: rgba(255,255,255,0.08);
+          color: inherit;
+          transition: opacity 120ms ease;
+        }
+        .pager-button:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
         }
         @media (min-width: 720px) {
           .grid { grid-template-columns: 1fr 1fr; }
@@ -254,7 +425,7 @@ class IdNoteList extends HTMLElement {
       </section>
     `;
 
-    this._setupObserver();
+    this._wirePager();
   }
 }
 

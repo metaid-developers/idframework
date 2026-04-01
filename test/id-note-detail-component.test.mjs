@@ -293,6 +293,22 @@ test('id-note-markdown-view strips executable html before rendering markdown out
   assert.doesNotMatch(html, /alert\(1\)/i);
 });
 
+test('id-note-markdown-view exposes reusable color variables', { concurrency: false }, async () => {
+  const registry = setupEnv();
+
+  await import('../idframework/components/id-note-markdown-view.js?case=markdown-view-color-vars');
+  const Ctor = registry.get('id-note-markdown-view');
+  const instance = new Ctor();
+  instance.setAttribute('content', 'contrast test');
+  instance.setAttribute('attachments', JSON.stringify([]));
+  instance.connectedCallback();
+
+  const html = instance.shadowRoot.innerHTML;
+  assert.match(html, /var\(--note-markdown-text/);
+  assert.match(html, /var\(--note-markdown-link/);
+  assert.match(html, /var\(--note-markdown-code-bg/);
+});
+
 test('id-note-markdown-editor upgrades all concurrent instances once Vditor finishes loading', { concurrency: false }, async () => {
   const { registry, scripts } = setupMarkdownEditorEnv();
 
@@ -378,7 +394,66 @@ test('id-note-detail renders markdown content, chain attachments, and owner edit
   const html = instance.shadowRoot.innerHTML;
   assert.match(html, /Rendered note/);
   assert.match(html, /Alice/);
+  assert.match(html, /class="body-shell"/);
+  assert.match(html, /--note-markdown-bg:/);
+  assert.match(html, /--note-markdown-code-bg:/);
   assert.match(html, /id-note-markdown-view/);
   assert.match(html, /files\/content/);
   assert.match(html, /Edit/);
+});
+
+test('id-note-detail wraps content in a contrast body shell with reusable variables', { concurrency: false }, async () => {
+  const registry = setupEnv();
+  const stores = {
+    note: {
+      detail: {
+        pinId: 'note-pin-contrast',
+        pin: { id: 'note-pin-contrast', address: '1owner' },
+        author: { name: 'Contrast' },
+        noteData: {
+          title: 'Readable note',
+          content: '# Contrast',
+          attachments: [],
+          tags: [],
+          encryption: '0',
+        },
+        isLoading: false,
+        error: '',
+      },
+    },
+    wallet: {
+      address: '1owner',
+    },
+    user: {
+      user: { address: '1owner' },
+    },
+  };
+
+  globalThis.window = {
+    ServiceLocator: {
+      metafs: 'https://mock.metafs.local/api',
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    location: { pathname: '/demo-note/index.html', search: '', hash: '#/note/note-pin-contrast' },
+    history: { pushState() {} },
+  };
+  globalThis.Alpine = {
+    store(name) {
+      return stores[name] || null;
+    },
+  };
+
+  await import('../idframework/components/id-note-markdown-view.js?case=detail-markdown-view-shell');
+  await import('../idframework/components/id-note-detail.js?case=detail-body-shell');
+  const Ctor = registry.get('id-note-detail');
+  assert.ok(Ctor, 'id-note-detail should be registered for contrast shell');
+
+  const instance = new Ctor();
+  instance.connectedCallback();
+
+  const html = instance.shadowRoot.innerHTML;
+  assert.match(html, /class="body-shell"/);
+  assert.match(html, /var\(--note-detail-body-bg/);
+  assert.match(html, /id-note-markdown-view/);
 });

@@ -4,8 +4,28 @@ import { buildNoteRouteUrl } from '../idframework/utils/note-route.js';
 
 export const NOTE_MODEL = {
   route: { path: '/', view: 'list', params: {}, query: {} },
-  publicList: { items: [], cursor: 0, hasMore: true, isLoading: false, error: '' },
-  myList: { items: [], cursor: 0, hasMore: true, isLoading: false, error: '' },
+  publicList: {
+    items: [],
+    cursor: 0,
+    hasMore: true,
+    isLoading: false,
+    error: '',
+    page: 1,
+    pageSize: 20,
+    currentCursor: '0',
+    cursorHistory: ['0'],
+  },
+  myList: {
+    items: [],
+    cursor: 0,
+    hasMore: true,
+    isLoading: false,
+    error: '',
+    page: 1,
+    pageSize: 20,
+    currentCursor: '0',
+    cursorHistory: ['0'],
+  },
   detail: { pinId: '', pin: null, noteData: null, author: null, isLoading: false, error: '' },
   editor: {
     mode: 'create',
@@ -134,6 +154,18 @@ export function ensureNoteStoreShape() {
   if (!note.myList || typeof note.myList !== 'object') note.myList = clone(NOTE_MODEL.myList);
   if (!note.detail || typeof note.detail !== 'object') note.detail = clone(NOTE_MODEL.detail);
   if (!note.editor || typeof note.editor !== 'object') note.editor = clone(NOTE_MODEL.editor);
+
+  [note.publicList, note.myList].forEach(function ensureListShape(list) {
+    if (!Array.isArray(list.items)) list.items = [];
+    if (list.cursor === undefined) list.cursor = 0;
+    if (list.hasMore === undefined) list.hasMore = true;
+    if (list.isLoading === undefined) list.isLoading = false;
+    if (list.error === undefined) list.error = '';
+    if (list.page === undefined) list.page = 1;
+    if (list.pageSize === undefined) list.pageSize = 20;
+    if (list.currentCursor === undefined) list.currentCursor = '0';
+    if (!Array.isArray(list.cursorHistory)) list.cursorHistory = ['0'];
+  });
 }
 
 function ensureDraftStoreShape() {
@@ -239,13 +271,30 @@ export async function loadRouteData(route) {
   if (!framework || typeof framework.dispatch !== 'function' || !route) return null;
 
   if (route.view === 'list') {
-    return await framework.dispatch('fetchNoteList', { cursor: 0, size: 20 });
+    return await framework.dispatch('fetchNoteList', {
+      cursor: '0',
+      size: 20,
+      replace: true,
+      page: 1,
+      pageSize: 20,
+      currentCursor: '0',
+      cursorHistory: ['0'],
+    });
   }
 
   if (route.view === 'mynote') {
     var address = currentAddress();
     if (!address) return null;
-    return await framework.dispatch('fetchMyNoteList', { address: address, cursor: 0, size: 20 });
+    return await framework.dispatch('fetchMyNoteList', {
+      address: address,
+      cursor: '0',
+      size: 20,
+      replace: true,
+      page: 1,
+      pageSize: 20,
+      currentCursor: '0',
+      cursorHistory: ['0'],
+    });
   }
 
   if (route.view === 'draft') {

@@ -24,6 +24,10 @@ export default {
     loadingTitle: '正在加载笔记',
     loadingMessage: '请稍候...',
     errorTitle: '加载笔记失败',
+    pagerLabel: '分页',
+    pagerPrevious: '上一页',
+    pagerNext: '下一页',
+    pagerPage: '第 {page} 页',
   },
   state: {
     emptyTitle: '这里还是空的',
