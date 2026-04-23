@@ -13,6 +13,7 @@ dist
 dist-ssr
 documents
 .worktrees
+.playwright-cli
 
 # macOS metadata
 .DS_Store

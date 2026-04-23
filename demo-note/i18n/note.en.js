@@ -60,7 +60,9 @@ export default {
   editor: {
     title: 'Title',
     subtitle: 'Subtitle',
-    cover: 'Cover URL',
+    cover: 'Cover image',
+    coverUpload: 'Upload cover image',
+    coverRemove: 'Remove cover',
     tags: 'Tags, comma separated',
     content: 'Write your markdown note...',
     private: 'Encrypt note body',

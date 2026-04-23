@@ -1,6 +1,8 @@
 import './id-note-markdown-editor.js';
 import './id-note-attachment-picker.js';
+import './id-note-cover-picker.js';
 import './id-chain-fee-selector.js';
+import { dataUrlFileName, dataUrlToFile, isDataUrl } from '../utils/file-data-url.js';
 
 export const NOTE_EDITOR_AUTOSAVE_MS = 5000;
 
@@ -29,6 +31,12 @@ function normalizePendingAttachment(item) {
     uploadedUri: String(value.uploadedUri || ''),
     file: value.file,
   };
+}
+
+function slugifyFileStem(value) {
+  var text = String(value || '').trim().toLowerCase();
+  text = text.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return text || 'note';
 }
 
 class IdNoteEditor extends HTMLElement {
@@ -84,6 +92,15 @@ class IdNoteEditor extends HTMLElement {
     var div = document.createElement('div');
     div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
+  }
+
+  _escapeAttr(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   _getStore(name) {
@@ -153,7 +170,11 @@ class IdNoteEditor extends HTMLElement {
     var nextKey = this._contextKey();
     if (!force && nextKey === this._lastContextKey) return;
     this._lastContextKey = nextKey;
-    this.render();
+    if (!this.shadowRoot || !this.shadowRoot.innerHTML) {
+      this.render();
+      return;
+    }
+    this._syncUi();
   }
 
   _updateField(field, value) {
@@ -163,7 +184,8 @@ class IdNoteEditor extends HTMLElement {
       [field]: value,
     };
     this._autosaveFailed = false;
-    this._checkContext(true);
+    this._lastContextKey = this._contextKey();
+    this._syncUi();
   }
 
   _updateTags(raw) {
@@ -196,7 +218,8 @@ class IdNoteEditor extends HTMLElement {
       }));
     });
     editor.pendingAttachments = nextItems;
-    this._checkContext(true);
+    this._lastContextKey = this._contextKey();
+    this._syncUi();
   }
 
   _revokePreviewUrl(item) {
@@ -226,7 +249,8 @@ class IdNoteEditor extends HTMLElement {
           return currentIndex !== index;
         })
       : [];
-    this._checkContext(true);
+    this._lastContextKey = this._contextKey();
+    this._syncUi();
   }
 
   async _runAutosave() {
@@ -286,16 +310,43 @@ class IdNoteEditor extends HTMLElement {
     return uploaded;
   }
 
+  _buildCoverFileName(dataUrl) {
+    var editor = this._editorState();
+    var stem = slugifyFileStem(editor && editor.form ? editor.form.title : '') + '-cover';
+    return dataUrlFileName(dataUrl, stem);
+  }
+
+  async _resolveCoverImg(value) {
+    var coverValue = String(value || '').trim();
+    if (!coverValue || !isDataUrl(coverValue)) return coverValue;
+    if (!(typeof window !== 'undefined' && window.IDFramework && typeof window.IDFramework.dispatch === 'function')) {
+      return coverValue;
+    }
+
+    var fileName = this._buildCoverFileName(coverValue);
+    var file = dataUrlToFile(coverValue, fileName);
+    var result = await window.IDFramework.dispatch('uploadNoteAttachment', {
+      file: file,
+      options: { fileName: fileName },
+    });
+
+    if (typeof result === 'string') return result;
+    if (result && typeof result.uri === 'string') return result.uri;
+    throw new Error('Cover upload did not return a URI');
+  }
+
   async _publish() {
     if (!(typeof window !== 'undefined' && window.IDFramework && typeof window.IDFramework.dispatch === 'function')) return;
     var editor = this._editorState();
     var uploaded = await this._uploadPendingAttachments();
+    var publishForm = cloneEditorForm(editor.form);
+    publishForm.coverImg = await this._resolveCoverImg(publishForm.coverImg);
     var commandName = editor.mode === 'edit' ? 'updateNote' : 'createNote';
     var result = await window.IDFramework.dispatch(commandName, {
       pinId: editor.pinId,
       draftId: editor.currentDraftId,
       isPrivate: String(editor.form.encryption || '0') !== '0',
-      form: cloneEditorForm(editor.form),
+      form: publishForm,
       existingAttachments: Array.isArray(editor.existingAttachments) ? editor.existingAttachments.slice() : [],
       pendingAttachments: uploaded,
     });
@@ -323,12 +374,81 @@ class IdNoteEditor extends HTMLElement {
     if (event) event.returnValue = this._t('note.editor.unsaved', 'You have unsaved changes.');
   }
 
+  _statusText(editor) {
+    if (editor.error) return editor.error;
+    return this._isDirty()
+      ? this._t('note.editor.dirty', 'Unsaved changes')
+      : this._t('note.editor.saved', 'All changes saved');
+  }
+
+  _syncUi() {
+    if (!this.shadowRoot) return;
+    var editor = this._editorState();
+    var form = cloneEditorForm(editor.form);
+    var inputs = this.shadowRoot.querySelectorAll ? this.shadowRoot.querySelectorAll('input[data-field]') : [];
+
+    for (var i = 0; i < inputs.length; i += 1) {
+      var input = inputs[i];
+      if (!input || typeof input.getAttribute !== 'function') continue;
+      var field = String(input.getAttribute('data-field') || '');
+      if (field === 'private') {
+        input.checked = String(form.encryption || '0') !== '0';
+        continue;
+      }
+      if (field === 'tags') {
+        var nextTags = Array.isArray(form.tags) ? form.tags.join(', ') : '';
+        if (input.value !== nextTags) input.value = nextTags;
+        continue;
+      }
+      if (field && field in form) {
+        var nextValue = form[field] == null ? '' : String(form[field]);
+        if (input.value !== nextValue) input.value = nextValue;
+      }
+    }
+
+    var markdownEditor = this.shadowRoot.querySelector ? this.shadowRoot.querySelector('id-note-markdown-editor') : null;
+    if (markdownEditor) {
+      if ('value' in markdownEditor) {
+        if (markdownEditor.value !== form.content) markdownEditor.value = form.content;
+      } else if (typeof markdownEditor.setAttribute === 'function' && markdownEditor.getAttribute && markdownEditor.getAttribute('value') !== form.content) {
+        markdownEditor.setAttribute('value', form.content);
+      }
+    }
+
+    var coverPicker = this.shadowRoot.querySelector ? this.shadowRoot.querySelector('id-note-cover-picker') : null;
+    if (coverPicker && typeof coverPicker.setAttribute === 'function') {
+      var coverAlt = this._t('note.card.coverAlt', 'Note cover');
+      var coverUpload = this._t('note.editor.coverUpload', 'Upload cover image');
+      var coverRemove = this._t('note.editor.coverRemove', 'Remove cover');
+      if (!coverPicker.getAttribute || coverPicker.getAttribute('value') !== form.coverImg) coverPicker.setAttribute('value', form.coverImg);
+      if (!coverPicker.getAttribute || coverPicker.getAttribute('alt') !== coverAlt) coverPicker.setAttribute('alt', coverAlt);
+      if (!coverPicker.getAttribute || coverPicker.getAttribute('upload-label') !== coverUpload) coverPicker.setAttribute('upload-label', coverUpload);
+      if (!coverPicker.getAttribute || coverPicker.getAttribute('remove-label') !== coverRemove) coverPicker.setAttribute('remove-label', coverRemove);
+    }
+
+    var picker = this.shadowRoot.querySelector ? this.shadowRoot.querySelector('id-note-attachment-picker') : null;
+    if (picker) picker.items = Array.isArray(editor.pendingAttachments) ? editor.pendingAttachments.slice() : [];
+
+    var status = this.shadowRoot.querySelector ? this.shadowRoot.querySelector('[data-role="status"]') : null;
+    if (status) {
+      status.textContent = this._statusText(editor);
+      status.className = 'status' + (editor.error ? ' error' : '');
+    }
+
+    var publishButton = this.shadowRoot.querySelector ? this.shadowRoot.querySelector('[data-role="publish"]') : null;
+    if (publishButton) {
+      publishButton.textContent = this._t(
+        editor.mode === 'edit' ? 'note.editor.update' : 'note.editor.publish',
+        editor.mode === 'edit' ? 'Update' : 'Publish'
+      );
+    }
+  }
+
   render() {
     if (!this.shadowRoot) return;
     var editor = this._editorState();
     var form = cloneEditorForm(editor.form);
     var tagsText = Array.isArray(form.tags) ? form.tags.join(', ') : '';
-    var pendingJson = this._escapeHtml(JSON.stringify(Array.isArray(editor.pendingAttachments) ? editor.pendingAttachments : []));
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -343,7 +463,7 @@ class IdNoteEditor extends HTMLElement {
           color: rgba(255,255,255,0.88);
         }
         .grid { display: grid; gap: 12px; }
-        input, textarea {
+        .field-input {
           width: 100%;
           box-sizing: border-box;
           padding: 10px 12px;
@@ -354,10 +474,23 @@ class IdNoteEditor extends HTMLElement {
         }
         .row { display: grid; gap: 12px; }
         .toggle {
-          display: inline-flex;
+          display: grid;
+          grid-template-columns: auto 1fr;
           align-items: center;
           gap: 8px;
           font-size: 13px;
+          justify-content: start;
+        }
+        .toggle-input {
+          width: auto;
+          margin: 0;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          accent-color: rgba(120, 160, 255, 0.92);
+        }
+        .toggle-copy {
+          line-height: 1.4;
         }
         .actions {
           display: flex;
@@ -379,17 +512,22 @@ class IdNoteEditor extends HTMLElement {
       </style>
       <section class="editor">
         <div class="grid">
-          <input data-field="title" type="text" placeholder="${this._escapeHtml(this._t('note.editor.title', 'Title'))}" value="${this._escapeHtml(form.title)}" />
-          <input data-field="subtitle" type="text" placeholder="${this._escapeHtml(this._t('note.editor.subtitle', 'Subtitle'))}" value="${this._escapeHtml(form.subtitle)}" />
-          <input data-field="coverImg" type="text" placeholder="${this._escapeHtml(this._t('note.editor.cover', 'Cover URL'))}" value="${this._escapeHtml(form.coverImg)}" />
-          <input data-field="tags" type="text" placeholder="${this._escapeHtml(this._t('note.editor.tags', 'Tags, comma separated'))}" value="${this._escapeHtml(tagsText)}" />
-          <label class="toggle"><input data-field="private" type="checkbox" ${String(form.encryption || '0') !== '0' ? 'checked' : ''} />${this._escapeHtml(this._t('note.editor.private', 'Encrypt note content'))}</label>
+          <input class="field-input" data-field="title" type="text" placeholder="${this._escapeAttr(this._t('note.editor.title', 'Title'))}" value="${this._escapeAttr(form.title)}" />
+          <input class="field-input" data-field="subtitle" type="text" placeholder="${this._escapeAttr(this._t('note.editor.subtitle', 'Subtitle'))}" value="${this._escapeAttr(form.subtitle)}" />
+          <id-note-cover-picker
+            value="${this._escapeAttr(form.coverImg)}"
+            alt="${this._escapeAttr(this._t('note.card.coverAlt', 'Note cover'))}"
+            upload-label="${this._escapeAttr(this._t('note.editor.coverUpload', 'Upload cover image'))}"
+            remove-label="${this._escapeAttr(this._t('note.editor.coverRemove', 'Remove cover'))}"
+          ></id-note-cover-picker>
+          <input class="field-input" data-field="tags" type="text" placeholder="${this._escapeAttr(this._t('note.editor.tags', 'Tags, comma separated'))}" value="${this._escapeAttr(tagsText)}" />
+          <label class="toggle"><input class="toggle-input" data-field="private" type="checkbox" ${String(form.encryption || '0') !== '0' ? 'checked' : ''} /><span class="toggle-copy">${this._escapeHtml(this._t('note.editor.private', 'Encrypt note content'))}</span></label>
         </div>
-        <id-note-markdown-editor value="${this._escapeHtml(form.content)}" placeholder="${this._escapeHtml(this._t('note.editor.content', 'Write your markdown note...'))}"></id-note-markdown-editor>
-        <id-note-attachment-picker items="${pendingJson}"></id-note-attachment-picker>
+        <id-note-markdown-editor value="${this._escapeAttr(form.content)}" placeholder="${this._escapeAttr(this._t('note.editor.content', 'Write your markdown note...'))}"></id-note-markdown-editor>
+        <id-note-attachment-picker></id-note-attachment-picker>
         <id-chain-fee-selector></id-chain-fee-selector>
         <div class="actions">
-          <p class="status ${editor.error ? 'error' : ''}">${this._escapeHtml(editor.error || (this._isDirty() ? this._t('note.editor.dirty', 'Unsaved changes') : this._t('note.editor.saved', 'All changes saved')))}</p>
+          <p class="status ${editor.error ? 'error' : ''}" data-role="status">${this._escapeHtml(this._statusText(editor))}</p>
           <button type="button" class="primary" data-role="publish">${this._escapeHtml(this._t(editor.mode === 'edit' ? 'note.editor.update' : 'note.editor.publish', editor.mode === 'edit' ? 'Update' : 'Publish'))}</button>
         </div>
       </section>
@@ -421,6 +559,13 @@ class IdNoteEditor extends HTMLElement {
       });
     }
 
+    var coverPicker = this.shadowRoot.querySelector('id-note-cover-picker');
+    if (coverPicker && typeof coverPicker.addEventListener === 'function') {
+      coverPicker.addEventListener('cover-change', (event) => {
+        this._updateField('coverImg', event && event.detail ? event.detail.value || '' : '');
+      });
+    }
+
     var picker = this.shadowRoot.querySelector('id-note-attachment-picker');
     if (picker && typeof picker.addEventListener === 'function') {
       picker.addEventListener('attachment-add', (event) => {
@@ -441,6 +586,8 @@ class IdNoteEditor extends HTMLElement {
         });
       });
     }
+
+    this._syncUi();
   }
 }
 

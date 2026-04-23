@@ -60,7 +60,9 @@ export default {
   editor: {
     title: '标题',
     subtitle: '副标题',
-    cover: '封面链接',
+    cover: '封面图片',
+    coverUpload: '上传封面图片',
+    coverRemove: '删除封面',
     tags: '标签，使用逗号分隔',
     content: '写下你的 Markdown 笔记...',
     private: '加密正文内容',

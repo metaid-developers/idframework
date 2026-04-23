@@ -144,6 +144,85 @@ function createStores() {
   };
 }
 
+function createInputStub(field, type = 'text') {
+  const listeners = new Map();
+  return {
+    value: '',
+    checked: false,
+    type,
+    addEventListener(name, handler) {
+      listeners.set(name, handler);
+    },
+    getAttribute(name) {
+      if (name === 'data-field') return field;
+      return null;
+    },
+  };
+}
+
+function createEditorShadowHarness() {
+  const titleInput = createInputStub('title');
+  const subtitleInput = createInputStub('subtitle');
+  const tagsInput = createInputStub('tags');
+  const privateInput = createInputStub('private', 'checkbox');
+  const markdownEditor = {
+    value: '',
+    placeholder: '',
+    addEventListener() {},
+  };
+  const coverPicker = {
+    _attrs: new Map(),
+    addEventListener() {},
+    setAttribute(name, value) {
+      this._attrs.set(String(name), String(value));
+    },
+    getAttribute(name) {
+      return this._attrs.has(String(name)) ? this._attrs.get(String(name)) : null;
+    },
+  };
+  const attachmentPicker = {
+    items: [],
+    addEventListener() {},
+  };
+  const status = {
+    textContent: '',
+    className: '',
+  };
+  const publishButton = {
+    textContent: '',
+    addEventListener() {},
+  };
+
+  return {
+    innerHTML: '',
+    querySelector(selector) {
+      if (selector === 'id-note-markdown-editor') return markdownEditor;
+      if (selector === 'id-note-cover-picker') return coverPicker;
+      if (selector === 'id-note-attachment-picker') return attachmentPicker;
+      if (selector === '[data-role="status"]') return status;
+      if (selector === '[data-role="publish"]') return publishButton;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'input[data-field]') {
+        return [titleInput, subtitleInput, tagsInput, privateInput];
+      }
+      return [];
+    },
+    refs: {
+      titleInput,
+      subtitleInput,
+      tagsInput,
+      privateInput,
+      markdownEditor,
+      coverPicker,
+      attachmentPicker,
+      status,
+      publishButton,
+    },
+  };
+}
+
 test('id-note-editor schedules SaveDraftCommand every 5000ms when dirty and protects leave when autosave fails', async () => {
   const stores = createStores();
   const { registry, intervals, listeners } = setupEnv(stores);
@@ -255,4 +334,137 @@ test('id-note-editor revokes remaining local attachment preview URLs on disconne
   instance.disconnectedCallback();
 
   assert.deepEqual(revokedUrls, ['blob:cover.png', 'blob:doc.pdf']);
+});
+
+test('id-note-editor renders text fields and private toggle with dedicated classes', async () => {
+  const stores = createStores();
+  const { registry } = setupEnv(stores);
+
+  await import('../idframework/components/id-note-markdown-editor.js?case=editor-markdown-render-classes');
+  await import('../idframework/components/id-note-attachment-picker.js?case=editor-picker-render-classes');
+  await import('../idframework/components/id-note-editor.js?case=editor-render-classes');
+  const Ctor = registry.get('id-note-editor');
+  assert.ok(Ctor, 'id-note-editor should be registered');
+
+  const instance = new Ctor();
+  instance.connectedCallback();
+
+  const html = instance.shadowRoot.innerHTML;
+  assert.match(html, /class="field-input"/);
+  assert.match(html, /class="toggle-input"/);
+  assert.match(html, /class="toggle-copy"/);
+  assert.match(html, /id-note-cover-picker/);
+});
+
+test('id-note-editor uploads a data-url cover before publish and forwards the metafile URI', async () => {
+  const stores = createStores();
+  const { registry } = setupEnv(stores);
+  const calls = [];
+
+  globalThis.Blob = globalThis.Blob || class Blob {
+    constructor(parts = [], options = {}) {
+      this.parts = parts;
+      this.type = options.type || '';
+      this.size = parts.reduce((sum, part) => sum + String(part).length, 0);
+    }
+  };
+  globalThis.File = class File extends Blob {
+    constructor(parts, name, options = {}) {
+      super(parts, options);
+      this.name = name;
+      this.lastModified = options.lastModified || Date.now();
+    }
+  };
+  globalThis.atob = globalThis.atob || ((value) => Buffer.from(value, 'base64').toString('binary'));
+
+  globalThis.window.IDFramework.dispatch = async (eventName, payload) => {
+    calls.push({ eventName, payload });
+    if (eventName === 'uploadNoteAttachment') {
+      return 'metafile://cover-uploaded-1.png';
+    }
+    if (eventName === 'createNote') {
+      return { pinRes: { data: { pinId: 'p'.repeat(64) } } };
+    }
+    throw new Error('unexpected command: ' + eventName);
+  };
+  globalThis.window.location = { pathname: '/demo-note/index.html', search: '' };
+  globalThis.window.history = { pushState() {} };
+  globalThis.window.dispatchEvent = () => true;
+
+  await import('../idframework/components/id-note-markdown-editor.js?case=editor-markdown-cover-upload');
+  await import('../idframework/components/id-note-attachment-picker.js?case=editor-picker-cover-upload');
+  await import('../idframework/components/id-note-editor.js?case=editor-cover-upload');
+  const Ctor = registry.get('id-note-editor');
+  assert.ok(Ctor, 'id-note-editor should be registered');
+
+  stores.note.editor.form.coverImg = 'data:image/png;base64,Zm9v';
+  stores.note.editor.form.title = 'Cover note';
+
+  const instance = new Ctor();
+  instance.connectedCallback();
+  await instance._publish();
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].eventName, 'uploadNoteAttachment');
+  assert.equal(calls[0].payload.file.name, 'cover-note-cover.png');
+  assert.equal(calls[1].eventName, 'createNote');
+  assert.equal(calls[1].payload.form.coverImg, 'metafile://cover-uploaded-1.png');
+});
+
+test('id-note-editor updates field state without forcing a full re-render on each keystroke', async () => {
+  const stores = createStores();
+  const { registry } = setupEnv(stores);
+
+  await import('../idframework/components/id-note-markdown-editor.js?case=editor-markdown-no-rerender');
+  await import('../idframework/components/id-note-attachment-picker.js?case=editor-picker-no-rerender');
+  await import('../idframework/components/id-note-editor.js?case=editor-no-rerender');
+  const Ctor = registry.get('id-note-editor');
+  assert.ok(Ctor, 'id-note-editor should be registered');
+
+  const instance = new Ctor();
+  const harness = createEditorShadowHarness();
+  instance.shadowRoot = harness;
+  instance.connectedCallback();
+
+  let renderCount = 0;
+  const originalRender = instance.render.bind(instance);
+  instance.render = () => {
+    renderCount += 1;
+    return originalRender();
+  };
+
+  instance._updateField('title', 'A');
+
+  assert.equal(renderCount, 0);
+  assert.equal(stores.note.editor.form.title, 'A');
+  assert.equal(harness.refs.titleInput.value, 'A');
+});
+
+test('id-note-editor syncs pending attachments onto the attachment picker instance', async () => {
+  const stores = createStores();
+  const { registry } = setupEnv(stores);
+
+  globalThis.URL = {
+    createObjectURL(file) {
+      return 'blob:' + file.name;
+    },
+    revokeObjectURL() {},
+  };
+
+  await import('../idframework/components/id-note-markdown-editor.js?case=editor-markdown-picker-sync');
+  await import('../idframework/components/id-note-attachment-picker.js?case=editor-picker-sync');
+  await import('../idframework/components/id-note-editor.js?case=editor-picker-sync');
+  const Ctor = registry.get('id-note-editor');
+  assert.ok(Ctor, 'id-note-editor should be registered');
+
+  const instance = new Ctor();
+  const harness = createEditorShadowHarness();
+  instance.shadowRoot = harness;
+  instance.connectedCallback();
+  instance._addPendingFiles([{ name: 'photo.png', type: 'image/png' }]);
+
+  assert.equal(stores.note.editor.pendingAttachments.length, 1);
+  assert.equal(harness.refs.attachmentPicker.items.length, 1);
+  assert.equal(harness.refs.attachmentPicker.items[0].name, 'photo.png');
+  assert.equal(harness.refs.attachmentPicker.items[0].blobUrl, 'blob:photo.png');
 });

@@ -18,6 +18,20 @@ function safeRevokeBlobUrl(blobUrl) {
   URL.revokeObjectURL(text);
 }
 
+function normalizeInlineId(value) {
+  var numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function withOptionalId(record, value) {
+  var id = normalizeInlineId(value);
+  if (!id) return record;
+  return {
+    id: id,
+    ...record,
+  };
+}
+
 class NativeDraftStorage {
   constructor(options = {}) {
     this._indexedDB = options.indexedDB || globalThis.indexedDB || null;
@@ -157,8 +171,7 @@ export class NoteDraftDB {
   async saveDraft(draft) {
     var current = draft && draft.id ? await this.getDraft(draft.id) : null;
     var now = Date.now();
-    var nextDraft = {
-      id: current && current.id ? current.id : draft && draft.id ? draft.id : undefined,
+    var nextDraft = withOptionalId({
       title: String(draft && draft.title || ''),
       subtitle: String(draft && draft.subtitle || ''),
       coverImg: String(draft && draft.coverImg || ''),
@@ -167,7 +180,7 @@ export class NoteDraftDB {
       pinId: String(draft && draft.pinId || ''),
       updatedAt: now,
       createdAt: current && current.createdAt ? current.createdAt : now,
-    };
+    }, current && current.id ? current.id : draft && draft.id);
 
     var id = await this._storage.put(DRAFT_STORE, nextDraft);
     return Number(id);
@@ -186,8 +199,7 @@ export class NoteDraftDB {
 
   async saveMediaFile(media) {
     var now = Date.now();
-    return await this._storage.put(MEDIA_STORE, {
-      id: media && media.id ? media.id : undefined,
+    return await this._storage.put(MEDIA_STORE, withOptionalId({
       draftId: Number(media && media.draftId || 0),
       blobUrl: String(media && media.blobUrl || ''),
       file: media ? media.file : undefined,
@@ -196,7 +208,7 @@ export class NoteDraftDB {
       mediaId: String(media && media.mediaId || ''),
       pinId: String(media && media.pinId || ''),
       createdAt: media && media.createdAt ? Number(media.createdAt) : now,
-    });
+    }, media && media.id));
   }
 
   async getMediaFilesByDraftId(id) {

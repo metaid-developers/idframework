@@ -49,6 +49,24 @@ function createMemoryStorage() {
   };
 }
 
+function createIndexedDBLikeStorage() {
+  const storage = createMemoryStorage();
+
+  return {
+    ...storage,
+    async put(storeName, value) {
+      if (Object.prototype.hasOwnProperty.call(value, 'id') && !Number.isFinite(value.id)) {
+        const error = new Error(
+          "Failed to execute 'put' on 'IDBObjectStore': Evaluating the object store's key path yielded a value that is not a valid key."
+        );
+        error.name = 'DataError';
+        throw error;
+      }
+      return await storage.put(storeName, value);
+    },
+  };
+}
+
 function createStores() {
   return {
     note: {
@@ -155,3 +173,38 @@ test('SaveDraftCommand upserts the draft and replaces pending media rows for aut
   assert.equal(media[0].mediaId, 'media-second-1');
 });
 
+test('SaveDraftCommand omits inline id keys for new drafts and pending media rows under IndexedDB semantics', async () => {
+  const stores = createStores();
+  const draftDB = new NoteDraftDB({ storage: createIndexedDBLikeStorage() });
+  const command = new SaveDraftCommand({ draftDB });
+
+  const result = await command.execute({
+    payload: {
+      form: {
+        title: 'Fresh draft',
+        subtitle: '',
+        coverImg: '',
+        content: 'Hello',
+        tags: [],
+      },
+      pendingAttachments: [
+        {
+          blobUrl: 'blob:cover-1',
+          file: { mock: true },
+          type: 'image/png',
+          name: 'cover.png',
+          mediaId: 'pending-cover-1',
+        },
+      ],
+    },
+    stores,
+  });
+
+  assert.ok(Number.isFinite(result.draftId));
+  const savedDraft = await draftDB.getDraft(result.draftId);
+  const mediaFiles = await draftDB.getMediaFilesByDraftId(result.draftId);
+
+  assert.equal(savedDraft.title, 'Fresh draft');
+  assert.equal(mediaFiles.length, 1);
+  assert.equal(mediaFiles[0].mediaId, 'pending-cover-1');
+});

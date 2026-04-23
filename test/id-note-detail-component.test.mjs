@@ -309,35 +309,26 @@ test('id-note-markdown-view exposes reusable color variables', { concurrency: fa
   assert.match(html, /var\(--note-markdown-code-bg/);
 });
 
-test('id-note-markdown-editor upgrades all concurrent instances once Vditor finishes loading', { concurrency: false }, async () => {
+test('id-note-markdown-editor keeps a simple textarea fallback and does not inject external editor scripts', { concurrency: false }, async () => {
   const { registry, scripts } = setupMarkdownEditorEnv();
 
-  await import('../idframework/components/id-note-markdown-editor.js?case=markdown-editor-concurrent');
+  await import('../idframework/components/id-note-markdown-editor.js?case=markdown-editor-simple');
   const Ctor = registry.get('id-note-markdown-editor');
   assert.ok(Ctor, 'id-note-markdown-editor should be registered');
 
   const first = new Ctor();
   const second = new Ctor();
+  first.setAttribute('placeholder', 'Write your markdown note...');
+  second.setAttribute('value', '## heading');
   first.connectedCallback();
   second.connectedCallback();
 
-  assert.equal(scripts.length, 1);
+  assert.equal(scripts.length, 0);
   assert.equal(first._vditor, null);
   assert.equal(second._vditor, null);
-
-  globalThis.window.Vditor = function FakeVditor() {
-    return {
-      setValue() {},
-      destroy() {},
-    };
-  };
-  scripts[0].onload();
-  await Promise.resolve();
-  await Promise.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  assert.ok(first._vditor, 'first editor should upgrade after script load');
-  assert.ok(second._vditor, 'second editor should also upgrade after script load');
+  assert.match(first.shadowRoot.innerHTML, /textarea/);
+  assert.equal(first.shadowRoot.querySelector('textarea').placeholder, 'Write your markdown note...');
+  assert.equal(second.shadowRoot.querySelector('textarea').value, '## heading');
 });
 
 test('id-note-detail renders markdown content, chain attachments, and owner edit action', { concurrency: false }, async () => {

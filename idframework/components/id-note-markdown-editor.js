@@ -1,6 +1,6 @@
 /**
  * id-note-markdown-editor
- * Thin wrapper around Vditor with a safe fallback textarea for non-browser/test envs.
+ * Stable markdown input built on a native textarea.
  *
  * Attributes:
  * - value: markdown string
@@ -9,15 +9,6 @@
  * Events:
  * - input: { value }
  */
-let vditorLoadPromise = null;
-
-function finalizeVditorLoadPromise() {
-  return vditorLoadPromise.then((loaded) => {
-    if (!loaded) vditorLoadPromise = null;
-    return loaded;
-  });
-}
-
 class IdNoteMarkdownEditor extends HTMLElement {
   constructor() {
     super();
@@ -36,25 +27,13 @@ class IdNoteMarkdownEditor extends HTMLElement {
     this._value = this.getAttribute('value') || '';
     this._placeholder = this.getAttribute('placeholder') || '';
     this.render();
-    this._initEditor();
-  }
-
-  disconnectedCallback() {
-    if (this._vditor && typeof this._vditor.destroy === 'function') {
-      try { this._vditor.destroy(); } catch (_) { /* noop */ }
-    }
-    this._vditor = null;
   }
 
   attributeChangedCallback(name, oldValue, newValue) {
     if (oldValue === newValue) return;
     if (name === 'value') {
       this._value = newValue || '';
-      if (this._vditor && typeof this._vditor.setValue === 'function') {
-        this._vditor.setValue(this._value);
-      } else {
-        this._syncTextareaValue();
-      }
+      this._syncTextareaValue();
     }
     if (name === 'placeholder') {
       this._placeholder = newValue || '';
@@ -80,72 +59,6 @@ class IdNoteMarkdownEditor extends HTMLElement {
     return this._placeholder;
   }
 
-  _getVditorCtor() {
-    if (typeof window !== 'undefined' && window && window.Vditor) return window.Vditor;
-    if (typeof globalThis !== 'undefined' && globalThis.Vditor) return globalThis.Vditor;
-    return null;
-  }
-
-  _ensureVditorLoaded() {
-    if (this._getVditorCtor()) return Promise.resolve(true);
-    if (typeof document === 'undefined') return Promise.resolve(false);
-    if (!document || typeof document.createElement !== 'function') return Promise.resolve(false);
-    if (vditorLoadPromise) {
-      return finalizeVditorLoadPromise().then(() => !!this._getVditorCtor());
-    }
-
-    var src = '';
-    try {
-      src = new URL('../vendors/vditor.js', import.meta.url).href;
-    } catch (_) {
-      return Promise.resolve(false);
-    }
-
-    var existingScript = document.querySelector && document.querySelector('script[data-idf-vditor]');
-    if (existingScript) {
-      vditorLoadPromise = new Promise((resolve) => {
-        if (this._getVditorCtor()) {
-          resolve(true);
-          return;
-        }
-
-        var settle = (value) => resolve(value);
-        if (typeof existingScript.addEventListener === 'function') {
-          existingScript.addEventListener('load', () => settle(true), { once: true });
-          existingScript.addEventListener('error', () => settle(false), { once: true });
-          return;
-        }
-
-        var previousLoad = existingScript.onload;
-        var previousError = existingScript.onerror;
-        existingScript.onload = (...args) => {
-          if (typeof previousLoad === 'function') previousLoad.apply(existingScript, args);
-          settle(true);
-        };
-        existingScript.onerror = (...args) => {
-          if (typeof previousError === 'function') previousError.apply(existingScript, args);
-          settle(false);
-        };
-      });
-      return finalizeVditorLoadPromise().then(() => !!this._getVditorCtor());
-    }
-
-    vditorLoadPromise = new Promise((resolve) => {
-      try {
-        var script = document.createElement('script');
-        script.setAttribute('data-idf-vditor', '1');
-        script.src = src;
-        script.onload = () => resolve(!!this._getVditorCtor());
-        script.onerror = () => resolve(false);
-        (document.head || document.body || document.documentElement).appendChild(script);
-      } catch (_) {
-        resolve(false);
-      }
-    });
-
-    return finalizeVditorLoadPromise().then(() => !!this._getVditorCtor());
-  }
-
   _syncTextareaValue() {
     if (!this.shadowRoot) return;
     var textarea = this.shadowRoot.querySelector('textarea');
@@ -158,35 +71,17 @@ class IdNoteMarkdownEditor extends HTMLElement {
     if (textarea) textarea.placeholder = this._placeholder;
   }
 
-  async _initEditor() {
-    var ok = await this._ensureVditorLoaded();
-    var VditorCtor = ok ? this._getVditorCtor() : null;
-    if (!VditorCtor) return;
-    if (!this.shadowRoot) return;
-    var host = this.shadowRoot.querySelector('.host');
-    if (!host) return;
-
-    try {
-      this._vditor = new VditorCtor(host, {
-        height: '360px',
-        placeholder: this._placeholder,
-        cache: { enable: false },
-        value: this._value,
-        input: (value) => {
-          this._value = value == null ? '' : String(value);
-          var EventCtor = (typeof CustomEvent !== 'undefined')
-            ? CustomEvent
-            : function MockCustomEvent(type, init) {
-              return { type: type, detail: init && init.detail, bubbles: !!(init && init.bubbles), composed: !!(init && init.composed) };
-            };
-          this.dispatchEvent(new EventCtor('input', { detail: { value: this._value }, bubbles: true, composed: true }));
-        },
-      });
-      var textarea = this.shadowRoot.querySelector('textarea');
-      if (textarea) textarea.style.display = 'none';
-    } catch (_) {
-      this._vditor = null;
-    }
+  _emitInput() {
+    var EventCtor = (typeof CustomEvent !== 'undefined')
+      ? CustomEvent
+      : function MockCustomEvent(type, init) {
+        return { type: type, detail: init && init.detail, bubbles: !!(init && init.bubbles), composed: !!(init && init.composed) };
+      };
+    this.dispatchEvent(new EventCtor('input', {
+      detail: { value: this._value },
+      bubbles: true,
+      composed: true,
+    }));
   }
 
   render() {
@@ -194,19 +89,41 @@ class IdNoteMarkdownEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        .fallback {
+        .wrap {
+          display: grid;
+          gap: 8px;
+        }
+        .helper {
+          margin: 0;
+          font-size: 12px;
+          line-height: 1.5;
+          color: rgba(255,255,255,0.58);
+        }
+        .editor {
           width: 100%;
-          min-height: 220px;
+          min-height: 320px;
           resize: vertical;
           box-sizing: border-box;
-          padding: 10px 12px;
-          border: 1px solid #d1d5db;
-          border-radius: 10px;
-          font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          padding: 14px 16px;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 14px;
+          background: rgba(12, 18, 30, 0.88);
+          color: rgba(241, 245, 249, 0.96);
+          font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          outline: none;
+        }
+        .editor:focus {
+          border-color: rgba(120, 160, 255, 0.56);
+          box-shadow: 0 0 0 3px rgba(120, 160, 255, 0.14);
+        }
+        .editor::placeholder {
+          color: rgba(148, 163, 184, 0.72);
         }
       </style>
-      <div class="host"></div>
-      <textarea id="${this._textareaId}" class="fallback" placeholder="${this._escapeAttr(this._placeholder)}"></textarea>
+      <div class="wrap">
+        <p class="helper">Markdown</p>
+        <textarea id="${this._textareaId}" class="editor" placeholder="${this._escapeAttr(this._placeholder)}"></textarea>
+      </div>
     `;
 
     var textarea = this.shadowRoot.querySelector('textarea');
@@ -214,12 +131,7 @@ class IdNoteMarkdownEditor extends HTMLElement {
       textarea.value = this._value;
       textarea.oninput = (event) => {
         this._value = event && event.target ? String(event.target.value || '') : '';
-        var EventCtor = (typeof CustomEvent !== 'undefined')
-          ? CustomEvent
-          : function MockCustomEvent(type, init) {
-            return { type: type, detail: init && init.detail, bubbles: !!(init && init.bubbles), composed: !!(init && init.composed) };
-          };
-        this.dispatchEvent(new EventCtor('input', { detail: { value: this._value }, bubbles: true, composed: true }));
+        this._emitInput();
       };
     }
   }
