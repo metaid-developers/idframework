@@ -97,6 +97,60 @@ test('id-chat-groupmsg-list routes mention click to private conversation selecti
   assert.equal(dispatchCalls[0].payload.type, '2');
 });
 
+test('id-chat-groupmsg-list syncs private crypto context from active conversation', async () => {
+  const registry = setupEnv();
+  globalThis.window = {};
+  globalThis.Alpine.store = (name) => {
+    if (name === 'chat') {
+      return {
+        currentConversation: 'peer_private_global',
+        currentConversationType: '2',
+        messages: {
+          peer_private_global: [
+            { id: 'msg_1', index: 12, content: 'cipher' },
+          ],
+        },
+        isLoading: false,
+        error: '',
+      };
+    }
+    if (name === 'wallet') {
+      return { globalMetaId: 'self_global_metaid' };
+    }
+    if (name === 'user') {
+      return { user: { metaid: 'self_metaid' } };
+    }
+    return null;
+  };
+
+  await import('../idframework/components/id-chat-groupmsg-list.js?case=private-context-sync');
+  const IdChatGroupmsgList = registry.get('id-chat-groupmsg-list');
+  const instance = new IdChatGroupmsgList();
+  const contextCalls = [];
+
+  instance._cryptoReady = true;
+  instance._cryptoStore = {
+    setContext(context) {
+      contextCalls.push(context);
+    },
+  };
+  instance._captureScrollMetrics = () => ({ top: 0, height: 0, clientHeight: 0, nearBottom: true });
+  instance.render = () => {};
+  instance._bindScroll = () => {};
+  instance._bindScrollToBottomButton = () => {};
+  instance._postRenderScrollAdjust = () => {};
+
+  instance._handleChatUpdated();
+
+  assert.deepEqual(contextCalls, [
+    {
+      mode: 'private',
+      groupId: '',
+      targetGlobalMetaId: 'peer_private_global',
+    },
+  ]);
+});
+
 test('id-chat-groupmsg-list can disable mention navigation via attribute', async () => {
   const registry = setupEnv();
   const dispatchCalls = [];

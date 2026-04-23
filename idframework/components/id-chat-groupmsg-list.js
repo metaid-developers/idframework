@@ -430,6 +430,7 @@ class IdChatGroupmsgList extends HTMLElement {
     const previousMaxIndex = this._lastMaxIndex;
     const previousOldestIndex = this._lastOldestIndex;
     const snapshot = this._snapshot();
+    this._syncCryptoContext(snapshot);
     const signature = this._signature(snapshot);
     if (signature === this._lastSignature) return;
     this._lastSignature = signature;
@@ -441,6 +442,24 @@ class IdChatGroupmsgList extends HTMLElement {
     this._lastMessageCount = Array.isArray(snapshot.messages) ? snapshot.messages.length : 0;
     this._lastMaxIndex = this._getMaxIndex(snapshot.messages);
     this._lastOldestIndex = this._getOldestIndex(snapshot.messages);
+  }
+
+  _syncCryptoContext(snapshot) {
+    if (!this._cryptoReady || !this._cryptoStore || !snapshot || !snapshot.currentConversation) return;
+    const isPrivate = String(snapshot.conversationType || '1') === '2';
+    if (isPrivate) {
+      this._cryptoStore.setContext({
+        mode: 'private',
+        groupId: '',
+        targetGlobalMetaId: String(snapshot.currentConversation || '').trim(),
+      });
+      return;
+    }
+    this._cryptoStore.setContext({
+      mode: 'public',
+      groupId: String(snapshot.currentConversation || '').trim(),
+      targetGlobalMetaId: '',
+    });
   }
 
   async _ensureCryptoHelper() {
